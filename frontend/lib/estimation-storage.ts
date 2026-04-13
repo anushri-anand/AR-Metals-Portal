@@ -24,9 +24,29 @@ export type TenderLog = {
   id: string | number
   tenderNumber: string
   tenderName: string
+  quoteRef: string
   clientId?: string | number | null
   clientName: string
+  contactName: string
   projectName: string
+  projectLocation: string
+  tenderDate: string | null
+  revisionNumber: string
+  revisionDate: string | null
+  description: string
+  sellingAmount: number
+  submissionDate: string | null
+  status: string
+  remarks: string
+}
+
+export type TenderLogInput = {
+  tenderNumber: string
+  tenderName: string
+  quoteRef: string
+  clientId?: string | number | null
+  projectName: string
+  projectLocation: string
   tenderDate: string | null
   submissionDate: string | null
   status: string
@@ -38,6 +58,7 @@ export type BoqItem = {
   sn: string
   tenderNumber: string
   revisionNumber: string
+  revisionDate: string | null
   clientsBoq: string
   description: string
   quantity: number
@@ -114,16 +135,32 @@ export async function createClientData(
 }
 
 export async function getTenderLogs(): Promise<TenderLog[]> {
-  return fetchAPI('/estimation/tender-log/')
+  const tenders = await fetchAPI('/estimation/tender-log/')
+
+  return tenders.map(normalizeTenderLog)
 }
 
 export async function createTenderLog(
-  item: Omit<TenderLog, 'id' | 'clientName'>
+  item: TenderLogInput
 ): Promise<TenderLog> {
-  return fetchAPI('/estimation/tender-log/', {
-    method: 'POST',
-    body: JSON.stringify(item),
-  })
+  return normalizeTenderLog(
+    await fetchAPI('/estimation/tender-log/', {
+      method: 'POST',
+      body: JSON.stringify(item),
+    })
+  )
+}
+
+export async function updateTenderLog(
+  id: string | number,
+  data: Partial<TenderLog>
+): Promise<TenderLog> {
+  return normalizeTenderLog(
+    await fetchAPI(`/estimation/tender-log/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  )
 }
 
 export async function getMasterListItems(): Promise<MasterListItem[]> {
@@ -403,16 +440,43 @@ export function formatMoney(value: number) {
   })
 }
 
+export const tenderStatusOptions = [
+  'Submitted & Awaiting',
+  'Awarded to ARM',
+  'Awarded to Others',
+  'Changed to VO',
+  'Cancelled',
+  'Regretted',
+  'To Revise & Re-submit',
+  'Under Pricing',
+] as const
+
+export type TenderStatus = (typeof tenderStatusOptions)[number]
+
 function toNumber(value: unknown) {
   const number = Number(value)
 
   return Number.isFinite(number) ? number : 0
 }
 
+function normalizeTenderLog(item: TenderLog): TenderLog {
+  return {
+    ...item,
+    quoteRef: item.quoteRef || '',
+    contactName: item.contactName || '',
+    projectLocation: item.projectLocation || '',
+    revisionNumber: item.revisionNumber || '',
+    revisionDate: item.revisionDate || null,
+    description: item.description || '',
+    sellingAmount: toNumber(item.sellingAmount),
+  }
+}
+
 function normalizeBoqItem(item: BoqItem): BoqItem {
   return {
     ...item,
     revisionNumber: item.revisionNumber || '',
+    revisionDate: item.revisionDate || null,
     quantity: toNumber(item.quantity),
     freightCustomDutyPercent: toNumber(item.freightCustomDutyPercent),
     prelimsPercent: toNumber(item.prelimsPercent),

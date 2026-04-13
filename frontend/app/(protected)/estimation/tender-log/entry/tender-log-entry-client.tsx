@@ -5,16 +5,19 @@ import {
   ClientData,
   createTenderLog,
   getClientData,
+  tenderStatusOptions,
 } from '@/lib/estimation-storage'
 
 const initialForm = {
   tenderNumber: '',
   tenderName: '',
+  quoteRef: '',
   clientId: '',
   projectName: '',
+  projectLocation: '',
   tenderDate: '',
   submissionDate: '',
-  status: '',
+  status: 'Under Pricing',
   remarks: '',
 }
 
@@ -58,11 +61,13 @@ export default function TenderLogEntryClient() {
       await createTenderLog({
         tenderNumber: form.tenderNumber.trim(),
         tenderName: form.tenderName.trim(),
+        quoteRef: form.quoteRef.trim(),
         clientId: form.clientId ? Number(form.clientId) : null,
         projectName: form.projectName.trim(),
+        projectLocation: form.projectLocation.trim(),
         tenderDate: form.tenderDate || null,
         submissionDate: form.submissionDate || null,
-        status: form.status.trim(),
+        status: form.status,
         remarks: form.remarks.trim(),
       })
 
@@ -72,6 +77,10 @@ export default function TenderLogEntryClient() {
       setError(err instanceof Error ? err.message : 'Failed to save tender log.')
     }
   }
+
+  const selectedClient = clients.find(
+    (client) => String(client.id) === String(form.clientId)
+  )
 
   return (
     <div className="space-y-6">
@@ -98,6 +107,26 @@ export default function TenderLogEntryClient() {
             />
           </Field>
 
+          <Field label="Quote Ref.">
+            <input
+              name="quoteRef"
+              value={form.quoteRef}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              placeholder="Enter quote reference"
+            />
+          </Field>
+
+          <Field label="Date">
+            <input
+              type="date"
+              name="tenderDate"
+              value={form.tenderDate}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+            />
+          </Field>
+
           <Field label="Tender Name">
             <input
               name="tenderName"
@@ -108,7 +137,7 @@ export default function TenderLogEntryClient() {
             />
           </Field>
 
-          <Field label="Client">
+          <Field label="Client Name">
             <select
               name="clientId"
               value={form.clientId}
@@ -124,6 +153,15 @@ export default function TenderLogEntryClient() {
             </select>
           </Field>
 
+          <Field label="Contact Name">
+            <input
+              value={selectedClient?.contactPerson || ''}
+              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
+              placeholder="Auto-filled from client data"
+              readOnly
+            />
+          </Field>
+
           <Field label="Project Name">
             <input
               name="projectName"
@@ -134,17 +172,17 @@ export default function TenderLogEntryClient() {
             />
           </Field>
 
-          <Field label="Tender Date">
+          <Field label="Project Location">
             <input
-              type="date"
-              name="tenderDate"
-              value={form.tenderDate}
+              name="projectLocation"
+              value={form.projectLocation}
               onChange={handleChange}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              placeholder="Enter project location"
             />
           </Field>
 
-          <Field label="Submission Date">
+          <Field label="Tender Submission Date">
             <input
               type="date"
               name="submissionDate"
@@ -155,13 +193,18 @@ export default function TenderLogEntryClient() {
           </Field>
 
           <Field label="Status">
-            <input
+            <select
               name="status"
               value={form.status}
               onChange={handleChange}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-              placeholder="Enter status"
-            />
+            >
+              {tenderStatusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
 

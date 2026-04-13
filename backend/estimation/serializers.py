@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 
 from rest_framework import serializers
@@ -27,6 +28,153 @@ LABOUR_STAGE_NAMES = [
     'Installation',
     'Packing',
 ]
+
+
+def get_tender_status_options():
+    return [
+        {'value': value, 'label': label}
+        for value, label in TenderLog.STATUS_CHOICES
+    ]
+
+
+def get_latest_revision_summary(tender_number):
+    boq_items = list(
+        BoqItem.objects.filter(tender_number=tender_number)
+        .select_related('costing')
+        .prefetch_related('costing__estimate_lines__item', 'costing__labour_lines__item')
+    )
+
+    if not boq_items:
+        return {
+            'revision_number': '',
+            'revision_date': None,
+            'description': '',
+            'selling_amount': Decimal('0.00'),
+        }
+
+    latest_revision_number = max(
+        {item.revision_number or '' for item in boq_items},
+        key=get_revision_sort_key,
+    )
+    latest_items = [
+        item
+        for item in boq_items
+        if (item.revision_number or '') == latest_revision_number
+    ]
+    revision_dates = [item.revision_date for item in latest_items if item.revision_date]
+    descriptions = []
+
+    for item in latest_items:
+        description = item.description.strip()
+        if description and description not in descriptions:
+            descriptions.append(description)
+
+    return {
+        'revision_number': latest_revision_number,
+        'revision_date': max(revision_dates) if revision_dates else None,
+        'description': '; '.join(descriptions),
+        'selling_amount': sum(
+            calculate_boq_item_selling_amount(item)
+            for item in latest_items
+        ),
+    }
+
+
+def get_revision_sort_key(value):
+    text = str(value or '').strip()
+    numbers = re.findall(r'\d+', text)
+
+    if numbers:
+        return (1, int(numbers[-1]), text)
+
+    return (0, 0, text)
+
+
+def calculate_boq_item_selling_amount(boq_item):
+    try:
+        costing = boq_item.costing
+    except TenderCosting.DoesNotExist:
+        return Decimal('0.00')
+
+    estimate_lines = list(costing.estimate_lines.all())
+    labour_lines = list(costing.labour_lines.all())
+
+    material_unit_cost = get_estimate_line_amount(
+        estimate_lines,
+        EstimateCostLine.MATERIAL,
+        include_wastage=True,
+    )
+    production_labour_unit_cost = get_labour_line_amount(
+        labour_lines,
+        LabourCostLine.PRODUCTION_LABOUR,
+    )
+    machining_unit_cost = get_estimate_line_amount(
+        estimate_lines,
+        EstimateCostLine.MACHINING,
+    )
+    coating_unit_cost = get_estimate_line_amount(
+        estimate_lines,
+        EstimateCostLine.COATING,
+    )
+    consumable_unit_cost = get_estimate_line_amount(
+        estimate_lines,
+        EstimateCostLine.CONSUMABLE,
+        include_wastage=True,
+    )
+    subcontract_unit_cost = get_estimate_line_amount(
+        estimate_lines,
+        EstimateCostLine.SUBCONTRACT,
+    )
+    installation_unit_cost = get_labour_line_amount(
+        labour_lines,
+        LabourCostLine.INSTALLATION_LABOUR,
+    )
+    base_unit_cost = (
+        material_unit_cost
+        + production_labour_unit_cost
+        + machining_unit_cost
+        + coating_unit_cost
+        + consumable_unit_cost
+        + subcontract_unit_cost
+        + installation_unit_cost
+    )
+    cost_percentage = (
+        boq_item.freight_custom_duty_percent
+        + boq_item.prelims_percent
+        + boq_item.foh_percent
+        + boq_item.commitments_percent
+        + boq_item.contingencies_percent
+    )
+    unit_cost = base_unit_cost + (base_unit_cost * cost_percentage / Decimal('100'))
+    selling_rate = unit_cost * boq_item.markup
+
+    return selling_rate * boq_item.quantity
+
+
+def get_estimate_line_amount(estimate_lines, category, include_wastage=False):
+    line = next((item for item in estimate_lines if item.category == category), None)
+
+    if not line or not line.item:
+        return Decimal('0.00')
+
+    quantity = line.quantity
+    if include_wastage:
+        quantity = quantity + (quantity * line.wastage_percent / Decimal('100'))
+
+    return quantity * line.item.rate
+
+
+def get_labour_line_amount(labour_lines, category):
+    return sum(
+        (
+            line.hours * line.item.rate
+            for line in labour_lines
+            if line.category == category and line.item
+        ),
+        Decimal('0.00'),
+    )
+
+
 class MasterListItemSerializer(serializers.ModelSerializer):
     itemDescription = serializers.CharField(source='item_description')
     poRefNumber = serializers.SerializerMethodField()
@@ -123,10 +271,21 @@ class TenderLogSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
     )
+    quoteRef = serializers.CharField(
+        source='quote_ref',
+        required=False,
+        allow_blank=True,
+    )
     clientId = serializers.IntegerField(required=False, allow_null=True, write_only=True)
     clientName = serializers.SerializerMethodField()
+    contactName = serializers.SerializerMethodField()
     projectName = serializers.CharField(
         source='project_name',
+        required=False,
+        allow_blank=True,
+    )
+    projectLocation = serializers.CharField(
+        source='project_location',
         required=False,
         allow_blank=True,
     )
@@ -135,6 +294,10 @@ class TenderLogSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    revisionNumber = serializers.SerializerMethodField()
+    revisionDate = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
+    sellingAmount = serializers.SerializerMethodField()
     submissionDate = serializers.DateField(
         source='submission_date',
         required=False,
@@ -147,10 +310,17 @@ class TenderLogSerializer(serializers.ModelSerializer):
             'id',
             'tenderNumber',
             'tenderName',
+            'quoteRef',
             'clientId',
             'clientName',
+            'contactName',
             'projectName',
+            'projectLocation',
             'tenderDate',
+            'revisionNumber',
+            'revisionDate',
+            'description',
+            'sellingAmount',
             'submissionDate',
             'status',
             'remarks',
@@ -161,6 +331,31 @@ class TenderLogSerializer(serializers.ModelSerializer):
 
     def get_clientName(self, obj):
         return obj.client.client_name if obj.client else ''
+
+    def get_contactName(self, obj):
+        return obj.client.contact_person if obj.client else ''
+
+    def get_revision_summary(self, obj):
+        if not hasattr(obj, '_latest_revision_summary'):
+            obj._latest_revision_summary = get_latest_revision_summary(
+                obj.tender_number
+            )
+
+        return obj._latest_revision_summary
+
+    def get_revisionNumber(self, obj):
+        return self.get_revision_summary(obj)['revision_number']
+
+    def get_revisionDate(self, obj):
+        revision_date = self.get_revision_summary(obj)['revision_date']
+        return revision_date.isoformat() if revision_date else None
+
+    def get_description(self, obj):
+        return self.get_revision_summary(obj)['description']
+
+    def get_sellingAmount(self, obj):
+        selling_amount = self.get_revision_summary(obj)['selling_amount']
+        return f'{selling_amount.quantize(Decimal("0.01"))}'
 
     def create(self, validated_data):
         client_id = validated_data.pop('clientId', None)
@@ -197,6 +392,11 @@ class BoqItemSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
         default='',
+    )
+    revisionDate = serializers.DateField(
+        source='revision_date',
+        required=False,
+        allow_null=True,
     )
     clientsBoq = serializers.CharField(
         source='clients_boq',
@@ -246,6 +446,7 @@ class BoqItemSerializer(serializers.ModelSerializer):
             'sn',
             'tenderNumber',
             'revisionNumber',
+            'revisionDate',
             'clientsBoq',
             'description',
             'quantity',

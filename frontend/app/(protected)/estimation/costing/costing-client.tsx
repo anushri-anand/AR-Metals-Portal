@@ -65,6 +65,7 @@ function createEmptyRow(sn = '1'): BoqItem {
     sn,
     tenderNumber: '',
     revisionNumber: '',
+    revisionDate: null,
     clientsBoq: '',
     description: '',
     quantity: 0,
@@ -86,6 +87,7 @@ export default function CostingClient() {
   const [tenderLogs, setTenderLogs] = useState<TenderLog[]>([])
   const [selectedTenderNumber, setSelectedTenderNumber] = useState('')
   const [revisionNumber, setRevisionNumber] = useState('')
+  const [revisionDate, setRevisionDate] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
@@ -110,6 +112,11 @@ export default function CostingClient() {
           savedBoqItems,
           firstTenderNumber
         )
+        const firstRevisionDate = getRevisionDate(
+          savedBoqItems,
+          firstTenderNumber,
+          firstRevisionNumber
+        )
 
         setAllRows(savedBoqItems)
         setMasterItems(savedMasterItems)
@@ -117,6 +124,7 @@ export default function CostingClient() {
         setTenderLogs(savedTenderLogs)
         setSelectedTenderNumber(firstTenderNumber)
         setRevisionNumber(firstRevisionNumber)
+        setRevisionDate(firstRevisionDate)
         setRows(
           firstTenderNumber
             ? getRowsForTenderRevision(
@@ -140,9 +148,11 @@ export default function CostingClient() {
 
   function handleTenderChange(value: string) {
     const nextRevisionNumber = getFirstRevision(allRows, value)
+    const nextRevisionDate = getRevisionDate(allRows, value, nextRevisionNumber)
 
     setSelectedTenderNumber(value)
     setRevisionNumber(nextRevisionNumber)
+    setRevisionDate(nextRevisionDate)
     setRows(
       value
         ? getRowsForTenderRevision(allRows, value, nextRevisionNumber)
@@ -154,6 +164,7 @@ export default function CostingClient() {
 
   function handleRevisionChange(value: string) {
     setRevisionNumber(value)
+    setRevisionDate(getRevisionDate(allRows, selectedTenderNumber, value))
     setRows(
       selectedTenderNumber
         ? getRowsForTenderRevision(allRows, selectedTenderNumber, value)
@@ -187,6 +198,7 @@ export default function CostingClient() {
         ...createEmptyRow(String(prev.length + 1)),
         tenderNumber: selectedTenderNumber,
         revisionNumber,
+        revisionDate: revisionDate || null,
       },
     ])
   }
@@ -206,6 +218,7 @@ export default function CostingClient() {
         sn: String(index + 1),
         tenderNumber: selectedTenderNumber,
         revisionNumber: revisionNumber.trim(),
+        revisionDate: revisionDate || null,
       }))
     const rowsFromOtherTenderRevisions = allRows.filter(
       (row) =>
@@ -262,6 +275,7 @@ export default function CostingClient() {
           sn: row.sn || String(index + 1),
           tenderNumber: selectedTenderNumber,
           revisionNumber: revisionNumber.trim(),
+          revisionDate: revisionDate || null,
           clientsBoq: row.clientsBoq || '',
           description: row.description || '',
           quantity: Number(row.quantity || 0),
@@ -419,6 +433,15 @@ export default function CostingClient() {
               onChange={(e) => handleRevisionChange(e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
               placeholder="Example: R0, R1"
+            />
+          </Field>
+
+          <Field label="Revision Date">
+            <input
+              type="date"
+              value={revisionDate}
+              onChange={(e) => setRevisionDate(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
             />
           </Field>
         </div>
@@ -825,8 +848,24 @@ function getRowsForTenderRevision(
           ...createEmptyRow(),
           tenderNumber,
           revisionNumber,
+          revisionDate: null,
         },
       ]
+}
+
+function getRevisionDate(
+  items: BoqItem[],
+  tenderNumber: string,
+  revisionNumber: string
+) {
+  return (
+    items.find(
+      (item) =>
+        item.tenderNumber === tenderNumber &&
+        item.revisionNumber === revisionNumber &&
+        item.revisionDate
+    )?.revisionDate || ''
+  )
 }
 
 function getRowSummary(

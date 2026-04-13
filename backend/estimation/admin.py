@@ -12,7 +12,27 @@ from .models import (
 
 
 admin.site.register(ClientData)
-admin.site.register(TenderLog)
+
+
+@admin.register(TenderLog)
+class TenderLogAdmin(admin.ModelAdmin):
+    list_display = (
+        'tender_number',
+        'quote_ref',
+        'client',
+        'project_name',
+        'status',
+        'submission_date',
+    )
+    list_filter = ('status', 'submission_date')
+    search_fields = (
+        'tender_number',
+        'quote_ref',
+        'client__client_name',
+        'project_name',
+    )
+
+
 admin.site.register(MasterListItem)
 admin.site.register(BoqItem)
 admin.site.register(TenderCosting)

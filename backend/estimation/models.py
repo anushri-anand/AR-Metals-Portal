@@ -44,8 +44,29 @@ class ClientData(models.Model):
 
 
 class TenderLog(models.Model):
+    STATUS_SUBMITTED_AWAITING = 'Submitted & Awaiting'
+    STATUS_AWARDED_ARM = 'Awarded to ARM'
+    STATUS_AWARDED_OTHERS = 'Awarded to Others'
+    STATUS_CHANGED_TO_VO = 'Changed to VO'
+    STATUS_CANCELLED = 'Cancelled'
+    STATUS_REGRETTED = 'Regretted'
+    STATUS_TO_REVISE = 'To Revise & Re-submit'
+    STATUS_UNDER_PRICING = 'Under Pricing'
+
+    STATUS_CHOICES = (
+        (STATUS_SUBMITTED_AWAITING, STATUS_SUBMITTED_AWAITING),
+        (STATUS_AWARDED_ARM, STATUS_AWARDED_ARM),
+        (STATUS_AWARDED_OTHERS, STATUS_AWARDED_OTHERS),
+        (STATUS_CHANGED_TO_VO, STATUS_CHANGED_TO_VO),
+        (STATUS_CANCELLED, STATUS_CANCELLED),
+        (STATUS_REGRETTED, STATUS_REGRETTED),
+        (STATUS_TO_REVISE, STATUS_TO_REVISE),
+        (STATUS_UNDER_PRICING, STATUS_UNDER_PRICING),
+    )
+
     tender_number = models.CharField(max_length=100, unique=True)
     tender_name = models.CharField(max_length=255, blank=True, default='')
+    quote_ref = models.CharField(max_length=100, blank=True, default='')
     client = models.ForeignKey(
         ClientData,
         on_delete=models.SET_NULL,
@@ -54,9 +75,14 @@ class TenderLog(models.Model):
         blank=True,
     )
     project_name = models.CharField(max_length=255, blank=True, default='')
+    project_location = models.CharField(max_length=255, blank=True, default='')
     tender_date = models.DateField(null=True, blank=True)
     submission_date = models.DateField(null=True, blank=True)
-    status = models.CharField(max_length=100, blank=True, default='')
+    status = models.CharField(
+        max_length=100,
+        choices=STATUS_CHOICES,
+        default=STATUS_UNDER_PRICING,
+    )
     remarks = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -72,6 +98,7 @@ class BoqItem(models.Model):
     sn = models.CharField(max_length=50, blank=True, default='')
     tender_number = models.CharField(max_length=100, db_index=True)
     revision_number = models.CharField(max_length=50, blank=True, default='')
+    revision_date = models.DateField(null=True, blank=True)
     clients_boq = models.CharField(max_length=255, blank=True, default='')
     description = models.TextField(blank=True, default='')
     quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
