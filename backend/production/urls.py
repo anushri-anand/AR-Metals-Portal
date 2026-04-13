@@ -1,11 +1,15 @@
 from django.urls import path
-from rest_framework.routers import DefaultRouter
-from .views import ProductionEntryViewSet, DeliveryEntryViewSet, ProductionStatusAPIView
 
-router = DefaultRouter()
-router.register(r'production-entries', ProductionEntryViewSet, basename='production-entry')
-router.register(r'delivery-entries', DeliveryEntryViewSet, basename='delivery-entry')
+from .views import (
+    ProjectDetailEntryAPIView,
+    ProjectDetailListAPIView,
+    ProjectDetailUpdateAPIView,
+    ProjectOptionsAPIView,
+)
 
-urlpatterns = router.urls + [
-    path('status/', ProductionStatusAPIView.as_view(), name='production-status'),
+urlpatterns = [
+    path('project-details/options/', ProjectOptionsAPIView.as_view(), name='project-options'),
+    path('project-details/entry/', ProjectDetailEntryAPIView.as_view(), name='project-detail-entry'),
+    path('project-details/update/', ProjectDetailUpdateAPIView.as_view(), name='project-detail-update'),
+    path('project-details/', ProjectDetailListAPIView.as_view(), name='project-detail-list'),
 ]

@@ -1,5 +1,5 @@
 import AppShell from '@/components/app-shell'
-import ProtectedClient from '../../components/protected-client'
+import ProtectedClient from '@/components/protected-client'
 
 export default function ProtectedLayout({
   children,

@@ -3,11 +3,13 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL
 export async function fetchAPI(path: string, options?: RequestInit) {
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+  const isFormData =
+    typeof FormData !== 'undefined' && options?.body instanceof FormData
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.headers || {}),
     },

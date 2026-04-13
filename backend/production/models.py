@@ -1,31 +1,37 @@
 from django.db import models
-from master_data.models import ProjectItem
 
 
-class ProductionEntry(models.Model):
-    project_item = models.ForeignKey(ProjectItem, on_delete=models.CASCADE, related_name='production_entries')
-    date = models.DateField()
-    cutting = models.IntegerField(default=0)
-    grooving = models.IntegerField(default=0)
-    bending = models.IntegerField(default=0)
-    fabrication = models.IntegerField(default=0)
-    welding = models.IntegerField(default=0)
-    finishing = models.IntegerField(default=0)
-    coating = models.IntegerField(default=0)
-    assembly = models.IntegerField(default=0)
-    installation = models.IntegerField(default=0)
+class ProjectDetail(models.Model):
+    project_name = models.CharField(max_length=255)
+    project_number = models.CharField(max_length=100, unique=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['project_number']
 
     def __str__(self):
-        return f"{self.project_item.item_name} - {self.date}"
+        return f'{self.project_number} - {self.project_name}'
 
 
-class DeliveryEntry(models.Model):
-    project_item = models.ForeignKey(ProjectItem, on_delete=models.CASCADE, related_name='delivery_entries')
-    date = models.DateField()
-    delivery_number = models.CharField(max_length=255)
-    delivery_quantity = models.IntegerField()
+class ProjectItem(models.Model):
+    project = models.ForeignKey(
+        ProjectDetail,
+        on_delete=models.CASCADE,
+        related_name='items',
+    )
+
+    item_name = models.CharField(max_length=255)
+    quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    unit = models.CharField(max_length=50)
+    estimated_mh = models.DecimalField(max_digits=12, decimal_places=2)
+
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['id']
 
     def __str__(self):
-        return f"{self.project_item.item_name} - {self.delivery_number}"
+        return f'{self.project.project_number} - {self.item_name}'
