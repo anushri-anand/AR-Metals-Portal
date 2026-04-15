@@ -6,6 +6,7 @@ export default function TenderLogPage() {
       title="Tender Log"
       links={[
         { label: 'Entry', href: '/estimation/tender-log/entry' },
+        { label: 'Update', href: '/estimation/tender-log/update' },
         { label: 'View', href: '/estimation/tender-log/view' },
       ]}
     />

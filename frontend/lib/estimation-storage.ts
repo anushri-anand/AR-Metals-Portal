@@ -11,6 +11,7 @@ export type MasterListItem = {
 export type ClientData = {
   id: string | number
   clientName: string
+  supplierTrnNo: string
   country: string
   city: string
   contactPerson: string
@@ -23,7 +24,6 @@ export type ClientData = {
 export type TenderLog = {
   id: string | number
   tenderNumber: string
-  tenderName: string
   quoteRef: string
   clientId?: string | number | null
   clientName: string
@@ -42,16 +42,102 @@ export type TenderLog = {
 
 export type TenderLogInput = {
   tenderNumber: string
-  tenderName: string
   quoteRef: string
+  revisionNumber: string
+  revisionDate: string | null
   clientId?: string | number | null
   projectName: string
   projectLocation: string
+  description: string
+  sellingAmount: number
   tenderDate: string | null
   submissionDate: string | null
   status: string
   remarks: string
 }
+
+export type ContractRevenueVariation = {
+  id?: string | number
+  variationNumber: string
+  amount: number
+}
+
+export type ContractRevenue = {
+  id: string | number
+  projectNumber: string
+  projectName: string
+  contractValue: number
+  startDate: string | null
+  completionDate: string | null
+  budgetMaterial: number
+  budgetMachining: number
+  budgetCoating: number
+  budgetConsumables: number
+  budgetSubcontracts: number
+  budgetProductionLabour: number
+  budgetFreightCustom: number
+  budgetInstallationLabour: number
+  budgetPrelims: number
+  budgetFoh: number
+  budgetCommitments: number
+  budgetContingencies: number
+  variations: ContractRevenueVariation[]
+}
+
+export type ContractRevenueInput = Omit<ContractRevenue, 'id'>
+
+export type ContractVariationStatus =
+  (typeof contractVariationStatusOptions)[number]
+
+export type ContractVariationLog = {
+  id: string | number
+  projectNumber: string
+  projectName: string
+  rfvNumber: string
+  clientVariationNumber: string
+  description: string
+  documentRef: string
+  submittedAmount: number
+  armLetterRef: string
+  submittedDate: string | null
+  approvedAmount: number
+  clientLetterRef: string
+  approvedDate: string | null
+  status: ContractVariationStatus | string
+  remarks: string
+}
+
+export type ContractVariationLogInput = Omit<ContractVariationLog, 'id'>
+
+export type ContractPaymentLog = {
+  id: string | number
+  projectNumber: string
+  projectName: string
+  sn: number
+  submittedDate: string | null
+  approvedDate: string | null
+  submittedAdvance: number
+  submittedRecoveryAdvance: number
+  grossSubmittedAmount: number
+  submittedRetention: number
+  submittedReleaseRetention: number
+  netSubmittedAmount: number
+  submittedVat: number
+  netSubmittedIncVat: number
+  approvedAdvance: number
+  approvedRecoveryAdvance: number
+  grossApprovedAmount: number
+  approvedRetention: number
+  approvedReleaseRetention: number
+  netApprovedAmount: number
+  approvedVat: number
+  netApprovedIncVat: number
+  dueDate: string | null
+  paidDate: string | null
+  forecastDate: string | null
+}
+
+export type ContractPaymentLogInput = Omit<ContractPaymentLog, 'id'>
 
 export type BoqItem = {
   id: string | number
@@ -80,9 +166,10 @@ export type EstimateItemWithWastage = EstimateItem & {
   wastagePercent: number
 }
 
-export type LabourValue = {
-  itemId: string | number
-  hours: number
+export type LabourHours = {
+  skilledHours: number
+  semiSkilledHours: number
+  helperHours: number
 }
 
 export const labourStageNames = [
@@ -100,7 +187,7 @@ export const labourStageNames = [
 
 export type LabourStageName = (typeof labourStageNames)[number]
 
-export type ProductionLabourDetails = Record<LabourStageName, LabourValue>
+export type ProductionLabourDetails = Record<LabourStageName, LabourHours>
 
 export type LabourDetails = ProductionLabourDetails
 
@@ -108,13 +195,13 @@ export type TenderCosting = {
   id: string | number
   boqItemId: string | number
   tenderNumber: string
-  material: EstimateItemWithWastage
+  material: EstimateItemWithWastage[]
   productionLabour: LabourDetails
-  machining: EstimateItem
-  coating: EstimateItem
-  consumable: EstimateItemWithWastage
-  subcontract: EstimateItem
-  installationLabour: LabourValue
+  machining: EstimateItem[]
+  coating: EstimateItem[]
+  consumable: EstimateItemWithWastage[]
+  subcontract: EstimateItem[]
+  installationLabour: LabourHours
 }
 
 export function createId(prefix: string) {
@@ -145,6 +232,57 @@ export async function createTenderLog(
 ): Promise<TenderLog> {
   return normalizeTenderLog(
     await fetchAPI('/estimation/tender-log/', {
+      method: 'POST',
+      body: JSON.stringify(item),
+    })
+  )
+}
+
+export async function getContractRevenues(): Promise<ContractRevenue[]> {
+  const revenues = await fetchAPI('/estimation/contract/revenue/')
+
+  return revenues.map(normalizeContractRevenue)
+}
+
+export async function createContractRevenue(
+  item: ContractRevenueInput
+): Promise<ContractRevenue> {
+  return normalizeContractRevenue(
+    await fetchAPI('/estimation/contract/revenue/', {
+      method: 'POST',
+      body: JSON.stringify(item),
+    })
+  )
+}
+
+export async function getContractVariationLogs(): Promise<ContractVariationLog[]> {
+  const logs = await fetchAPI('/estimation/contract/variation-log/')
+
+  return logs.map(normalizeContractVariationLog)
+}
+
+export async function createContractVariationLog(
+  item: ContractVariationLogInput
+): Promise<ContractVariationLog> {
+  return normalizeContractVariationLog(
+    await fetchAPI('/estimation/contract/variation-log/', {
+      method: 'POST',
+      body: JSON.stringify(item),
+    })
+  )
+}
+
+export async function getContractPaymentLogs(): Promise<ContractPaymentLog[]> {
+  const logs = await fetchAPI('/estimation/contract/payment-log/')
+
+  return logs.map(normalizeContractPaymentLog)
+}
+
+export async function createContractPaymentLog(
+  item: ContractPaymentLogInput
+): Promise<ContractPaymentLog> {
+  return normalizeContractPaymentLog(
+    await fetchAPI('/estimation/contract/payment-log/', {
       method: 'POST',
       body: JSON.stringify(item),
     })
@@ -225,14 +363,18 @@ export async function updateBoqItem(
 }
 
 export async function getTenderCostings(): Promise<TenderCosting[]> {
-  return fetchAPI('/estimation/costings/')
+  const costings = await fetchAPI('/estimation/costings/')
+
+  return costings.map(normalizeTenderCosting)
 }
 
 export async function getTenderCosting(
   boqItemId: string | number
 ): Promise<TenderCosting | null> {
   try {
-    return await fetchAPI(`/estimation/costings/${boqItemId}/`)
+    return normalizeTenderCosting(
+      await fetchAPI(`/estimation/costings/${boqItemId}/`)
+    )
   } catch {
     return null
   }
@@ -241,10 +383,12 @@ export async function getTenderCosting(
 export async function saveTenderCosting(
   costing: TenderCosting
 ): Promise<TenderCosting> {
-  return fetchAPI(`/estimation/costings/${costing.boqItemId}/`, {
-    method: 'POST',
-    body: JSON.stringify(costing),
-  })
+  return normalizeTenderCosting(
+    await fetchAPI(`/estimation/costings/${costing.boqItemId}/`, {
+      method: 'POST',
+      body: JSON.stringify(costing),
+    })
+  )
 }
 
 export function createEmptyEstimateItem(): EstimateItem {
@@ -262,16 +406,17 @@ export function createEmptyEstimateItemWithWastage(): EstimateItemWithWastage {
   }
 }
 
-export function createEmptyLabourValue(): LabourValue {
+export function createEmptyLabourHours(): LabourHours {
   return {
-    itemId: '',
-    hours: 0,
+    skilledHours: 0,
+    semiSkilledHours: 0,
+    helperHours: 0,
   }
 }
 
 export function createEmptyLabourDetails(): LabourDetails {
   return labourStageNames.reduce((details, stageName) => {
-    details[stageName] = createEmptyLabourValue()
+    details[stageName] = createEmptyLabourHours()
 
     return details
   }, {} as LabourDetails)
@@ -285,13 +430,13 @@ export function createEmptyTenderCosting(
     id: createId('costing'),
     boqItemId,
     tenderNumber,
-    material: createEmptyEstimateItemWithWastage(),
+    material: [createEmptyEstimateItemWithWastage()],
     productionLabour: createEmptyLabourDetails(),
-    machining: createEmptyEstimateItem(),
-    coating: createEmptyEstimateItem(),
-    consumable: createEmptyEstimateItemWithWastage(),
-    subcontract: createEmptyEstimateItem(),
-    installationLabour: createEmptyLabourValue(),
+    machining: [createEmptyEstimateItem()],
+    coating: [createEmptyEstimateItem()],
+    consumable: [createEmptyEstimateItemWithWastage()],
+    subcontract: [createEmptyEstimateItem()],
+    installationLabour: createEmptyLabourHours(),
   }
 }
 
@@ -328,25 +473,58 @@ export function getEstimateItemWithWastageAmount(
   return getEstimateItemWithWastageQuantity(value) * toNumber(item?.rate)
 }
 
+export function getEstimateItemsAmount(
+  values: EstimateItem[],
+  masterItems: MasterListItem[]
+) {
+  return values.reduce(
+    (total, item) => total + getEstimateItemAmount(item, masterItems),
+    0
+  )
+}
+
+export function getEstimateItemsWithWastageAmount(
+  values: EstimateItemWithWastage[],
+  masterItems: MasterListItem[]
+) {
+  return values.reduce(
+    (total, item) => total + getEstimateItemWithWastageAmount(item, masterItems),
+    0
+  )
+}
+
 export function getProductionLabourUnitCost(
   value: ProductionLabourDetails,
   masterItems: MasterListItem[]
 ) {
   return labourStageNames.reduce((stageTotal, stageName) => {
     const stage = value[stageName]
-    const item = getMasterItem(masterItems, stage.itemId)
+    const skilledRate = getLabourRate(masterItems, 'skilled')
+    const semiSkilledRate = getLabourRate(masterItems, 'semiSkilled')
+    const helperRate = getLabourRate(masterItems, 'helper')
 
-    return stageTotal + toNumber(stage.hours) * toNumber(item?.rate)
+    return (
+      stageTotal +
+      toNumber(stage.skilledHours) * skilledRate +
+      toNumber(stage.semiSkilledHours) * semiSkilledRate +
+      toNumber(stage.helperHours) * helperRate
+    )
   }, 0)
 }
 
 export function getInstallationLabourUnitCost(
-  value: LabourValue,
+  value: LabourHours,
   masterItems: MasterListItem[]
 ) {
-  const item = getMasterItem(masterItems, value.itemId)
+  const skilledRate = getLabourRate(masterItems, 'skilled')
+  const semiSkilledRate = getLabourRate(masterItems, 'semiSkilled')
+  const helperRate = getLabourRate(masterItems, 'helper')
 
-  return toNumber(value.hours) * toNumber(item?.rate)
+  return (
+    toNumber(value.skilledHours) * skilledRate +
+    toNumber(value.semiSkilledHours) * semiSkilledRate +
+    toNumber(value.helperHours) * helperRate
+  )
 }
 
 export function calculateCostSummary({
@@ -370,7 +548,7 @@ export function calculateCostSummary({
   markup: number
   masterItems: MasterListItem[]
 }) {
-  const materialUnitCost = getEstimateItemWithWastageAmount(
+  const materialUnitCost = getEstimateItemsWithWastageAmount(
     costing.material,
     masterItems
   )
@@ -378,13 +556,16 @@ export function calculateCostSummary({
     costing.productionLabour,
     masterItems
   )
-  const machiningUnitCost = getEstimateItemAmount(costing.machining, masterItems)
-  const coatingUnitCost = getEstimateItemAmount(costing.coating, masterItems)
-  const consumableUnitCost = getEstimateItemWithWastageAmount(
+  const machiningUnitCost = getEstimateItemsAmount(costing.machining, masterItems)
+  const coatingUnitCost = getEstimateItemsAmount(costing.coating, masterItems)
+  const consumableUnitCost = getEstimateItemsWithWastageAmount(
     costing.consumable,
     masterItems
   )
-  const subcontractUnitCost = getEstimateItemAmount(costing.subcontract, masterItems)
+  const subcontractUnitCost = getEstimateItemsAmount(
+    costing.subcontract,
+    masterItems
+  )
   const installationLabourUnitCost = getInstallationLabourUnitCost(
     costing.installationLabour,
     masterItems
@@ -453,6 +634,15 @@ export const tenderStatusOptions = [
 
 export type TenderStatus = (typeof tenderStatusOptions)[number]
 
+export const contractVariationStatusOptions = [
+  'Agreed',
+  'Submitted',
+  'To be Submitted',
+  'Rejected',
+  'Disputed',
+  'Cancelled',
+] as const
+
 function toNumber(value: unknown) {
   const number = Number(value)
 
@@ -485,4 +675,156 @@ function normalizeBoqItem(item: BoqItem): BoqItem {
     contingenciesPercent: toNumber(item.contingenciesPercent),
     markup: toNumber(item.markup),
   }
+}
+
+function normalizeTenderCosting(item: TenderCosting): TenderCosting {
+  return {
+    ...item,
+    material: normalizeEstimateItemsWithWastage(item.material),
+    productionLabour: normalizeProductionLabour(item.productionLabour),
+    machining: normalizeEstimateItems(item.machining),
+    coating: normalizeEstimateItems(item.coating),
+    consumable: normalizeEstimateItemsWithWastage(item.consumable),
+    subcontract: normalizeEstimateItems(item.subcontract),
+    installationLabour: normalizeLabourHours(item.installationLabour),
+  }
+}
+
+function normalizeContractRevenue(item: ContractRevenue): ContractRevenue {
+  return {
+    ...item,
+    contractValue: toNumber(item.contractValue),
+    startDate: item.startDate || null,
+    completionDate: item.completionDate || null,
+    budgetMaterial: toNumber(item.budgetMaterial),
+    budgetMachining: toNumber(item.budgetMachining),
+    budgetCoating: toNumber(item.budgetCoating),
+    budgetConsumables: toNumber(item.budgetConsumables),
+    budgetSubcontracts: toNumber(item.budgetSubcontracts),
+    budgetProductionLabour: toNumber(item.budgetProductionLabour),
+    budgetFreightCustom: toNumber(item.budgetFreightCustom),
+    budgetInstallationLabour: toNumber(item.budgetInstallationLabour),
+    budgetPrelims: toNumber(item.budgetPrelims),
+    budgetFoh: toNumber(item.budgetFoh),
+    budgetCommitments: toNumber(item.budgetCommitments),
+    budgetContingencies: toNumber(item.budgetContingencies),
+    variations: (item.variations || []).map((variation) => ({
+      ...variation,
+      amount: toNumber(variation.amount),
+    })),
+  }
+}
+
+function normalizeContractVariationLog(
+  item: ContractVariationLog
+): ContractVariationLog {
+  return {
+    ...item,
+    rfvNumber: item.rfvNumber || '',
+    clientVariationNumber: item.clientVariationNumber || '',
+    description: item.description || '',
+    documentRef: item.documentRef || '',
+    submittedAmount: toNumber(item.submittedAmount),
+    armLetterRef: item.armLetterRef || '',
+    submittedDate: item.submittedDate || null,
+    approvedAmount: toNumber(item.approvedAmount),
+    clientLetterRef: item.clientLetterRef || '',
+    approvedDate: item.approvedDate || null,
+    remarks: item.remarks || '',
+  }
+}
+
+function normalizeContractPaymentLog(item: ContractPaymentLog): ContractPaymentLog {
+  return {
+    ...item,
+    sn: toNumber(item.sn),
+    submittedDate: item.submittedDate || null,
+    approvedDate: item.approvedDate || null,
+    submittedAdvance: toNumber(item.submittedAdvance),
+    submittedRecoveryAdvance: toNumber(item.submittedRecoveryAdvance),
+    grossSubmittedAmount: toNumber(item.grossSubmittedAmount),
+    submittedRetention: toNumber(item.submittedRetention),
+    submittedReleaseRetention: toNumber(item.submittedReleaseRetention),
+    netSubmittedAmount: toNumber(item.netSubmittedAmount),
+    submittedVat: toNumber(item.submittedVat),
+    netSubmittedIncVat: toNumber(item.netSubmittedIncVat),
+    approvedAdvance: toNumber(item.approvedAdvance),
+    approvedRecoveryAdvance: toNumber(item.approvedRecoveryAdvance),
+    grossApprovedAmount: toNumber(item.grossApprovedAmount),
+    approvedRetention: toNumber(item.approvedRetention),
+    approvedReleaseRetention: toNumber(item.approvedReleaseRetention),
+    netApprovedAmount: toNumber(item.netApprovedAmount),
+    approvedVat: toNumber(item.approvedVat),
+    netApprovedIncVat: toNumber(item.netApprovedIncVat),
+    dueDate: item.dueDate || null,
+    paidDate: item.paidDate || null,
+    forecastDate: item.forecastDate || null,
+  }
+}
+
+function normalizeEstimateItems(
+  value: EstimateItem[] | EstimateItem | undefined | null
+): EstimateItem[] {
+  const items = Array.isArray(value) ? value : value ? [value] : []
+  const normalizedItems = items.map((item) => ({
+    itemId: item?.itemId || '',
+    quantity: toNumber(item?.quantity),
+  }))
+
+  return normalizedItems.length > 0 ? normalizedItems : [createEmptyEstimateItem()]
+}
+
+function normalizeEstimateItemsWithWastage(
+  value: EstimateItemWithWastage[] | EstimateItemWithWastage | undefined | null
+): EstimateItemWithWastage[] {
+  const items = Array.isArray(value) ? value : value ? [value] : []
+  const normalizedItems = items.map((item) => ({
+    itemId: item?.itemId || '',
+    quantity: toNumber(item?.quantity),
+    wastagePercent: toNumber(item?.wastagePercent),
+  }))
+
+  return normalizedItems.length > 0
+    ? normalizedItems
+    : [createEmptyEstimateItemWithWastage()]
+}
+
+function normalizeProductionLabour(
+  value: ProductionLabourDetails | Record<string, unknown> | undefined | null
+): ProductionLabourDetails {
+  return labourStageNames.reduce((details, stageName) => {
+    details[stageName] = normalizeLabourHours(
+      (value as Record<string, LabourHours | undefined> | undefined)?.[stageName]
+    )
+
+    return details
+  }, {} as ProductionLabourDetails)
+}
+
+function normalizeLabourHours(
+  value: LabourHours | Record<string, unknown> | undefined | null
+): LabourHours {
+  return {
+    skilledHours: toNumber(value?.skilledHours),
+    semiSkilledHours: toNumber(value?.semiSkilledHours),
+    helperHours: toNumber(value?.helperHours),
+  }
+}
+
+function getLabourRate(
+  masterItems: MasterListItem[],
+  role: 'skilled' | 'semiSkilled' | 'helper'
+) {
+  const roleNames =
+    role === 'skilled'
+      ? ['skilled labour']
+      : role === 'semiSkilled'
+        ? ['semi skilled labour', 'semi-skilled labour', 'semiskilled labour']
+        : ['helper', 'helper labour']
+
+  const match = masterItems.find((item) =>
+    roleNames.includes(item.itemDescription.trim().toLowerCase())
+  )
+
+  return toNumber(match?.rate)
 }

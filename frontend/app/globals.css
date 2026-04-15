@@ -35,3 +35,12 @@ input::placeholder,
 textarea::placeholder {
   color: #0f172a;
 }
+
+table {
+  border-collapse: collapse;
+}
+
+table th,
+table td {
+  border: 1px solid #cbd5e1;
+}

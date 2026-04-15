@@ -8,6 +8,10 @@ from procurement.models import PurchaseOrder
 from .models import (
     BoqItem,
     ClientData,
+    ContractPaymentLog,
+    ContractRevenue,
+    ContractRevenueVariation,
+    ContractVariationLog,
     EstimateCostLine,
     LabourCostLine,
     MasterListItem,
@@ -28,6 +32,18 @@ LABOUR_STAGE_NAMES = [
     'Installation',
     'Packing',
 ]
+
+LABOUR_ROLE_FIELD_MAP = {
+    'skilled': 'skilledHours',
+    'semiSkilled': 'semiSkilledHours',
+    'helper': 'helperHours',
+}
+
+LABOUR_ROLE_NAME_MAP = {
+    'skilled': ['skilled labour'],
+    'semiSkilled': ['semi skilled labour', 'semi-skilled labour', 'semiskilled labour'],
+    'helper': ['helper', 'helper labour'],
+}
 
 
 def get_tender_status_options():
@@ -152,16 +168,19 @@ def calculate_boq_item_selling_amount(boq_item):
 
 
 def get_estimate_line_amount(estimate_lines, category, include_wastage=False):
-    line = next((item for item in estimate_lines if item.category == category), None)
+    total = Decimal('0.00')
 
-    if not line or not line.item:
-        return Decimal('0.00')
+    for line in estimate_lines:
+        if line.category != category or not line.item:
+            continue
 
-    quantity = line.quantity
-    if include_wastage:
-        quantity = quantity + (quantity * line.wastage_percent / Decimal('100'))
+        quantity = line.quantity
+        if include_wastage:
+            quantity = quantity + (quantity * line.wastage_percent / Decimal('100'))
 
-    return quantity * line.item.rate
+        total += quantity * line.item.rate
+
+    return total
 
 
 def get_labour_line_amount(labour_lines, category):
@@ -230,6 +249,11 @@ class MasterListItemSerializer(serializers.ModelSerializer):
 
 class ClientDataSerializer(serializers.ModelSerializer):
     clientName = serializers.CharField(source='client_name')
+    supplierTrnNo = serializers.CharField(
+        source='supplier_trn_no',
+        required=False,
+        allow_blank=True,
+    )
     contactPerson = serializers.CharField(
         source='contact_person',
         required=False,
@@ -251,6 +275,7 @@ class ClientDataSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'clientName',
+            'supplierTrnNo',
             'country',
             'city',
             'contactPerson',
@@ -266,15 +291,20 @@ class ClientDataSerializer(serializers.ModelSerializer):
 
 class TenderLogSerializer(serializers.ModelSerializer):
     tenderNumber = serializers.CharField(source='tender_number')
-    tenderName = serializers.CharField(
-        source='tender_name',
-        required=False,
-        allow_blank=True,
-    )
     quoteRef = serializers.CharField(
         source='quote_ref',
         required=False,
         allow_blank=True,
+    )
+    revisionNumber = serializers.CharField(
+        source='revision_number',
+        required=False,
+        allow_blank=True,
+    )
+    revisionDate = serializers.DateField(
+        source='revision_date',
+        required=False,
+        allow_null=True,
     )
     clientId = serializers.IntegerField(required=False, allow_null=True, write_only=True)
     clientName = serializers.SerializerMethodField()
@@ -294,10 +324,13 @@ class TenderLogSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    revisionNumber = serializers.SerializerMethodField()
-    revisionDate = serializers.SerializerMethodField()
-    description = serializers.SerializerMethodField()
-    sellingAmount = serializers.SerializerMethodField()
+    description = serializers.CharField(required=False, allow_blank=True)
+    sellingAmount = serializers.DecimalField(
+        source='selling_amount',
+        max_digits=14,
+        decimal_places=2,
+        required=False,
+    )
     submissionDate = serializers.DateField(
         source='submission_date',
         required=False,
@@ -309,16 +342,15 @@ class TenderLogSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'tenderNumber',
-            'tenderName',
             'quoteRef',
+            'revisionNumber',
+            'revisionDate',
             'clientId',
             'clientName',
             'contactName',
             'projectName',
             'projectLocation',
             'tenderDate',
-            'revisionNumber',
-            'revisionDate',
             'description',
             'sellingAmount',
             'submissionDate',
@@ -335,27 +367,27 @@ class TenderLogSerializer(serializers.ModelSerializer):
     def get_contactName(self, obj):
         return obj.client.contact_person if obj.client else ''
 
-    def get_revision_summary(self, obj):
-        if not hasattr(obj, '_latest_revision_summary'):
-            obj._latest_revision_summary = get_latest_revision_summary(
-                obj.tender_number
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        latest_revision = get_latest_revision_summary(instance.tender_number)
+        selling_amount = Decimal(str(data.get('sellingAmount') or '0'))
+
+        data['revisionNumber'] = (
+            data.get('revisionNumber') or latest_revision['revision_number']
+        )
+        data['revisionDate'] = data.get('revisionDate') or (
+            latest_revision['revision_date'].isoformat()
+            if latest_revision['revision_date']
+            else None
+        )
+        data['description'] = data.get('description') or latest_revision['description']
+
+        if selling_amount == Decimal('0.00') and latest_revision['selling_amount']:
+            data['sellingAmount'] = (
+                f'{latest_revision["selling_amount"].quantize(Decimal("0.01"))}'
             )
 
-        return obj._latest_revision_summary
-
-    def get_revisionNumber(self, obj):
-        return self.get_revision_summary(obj)['revision_number']
-
-    def get_revisionDate(self, obj):
-        revision_date = self.get_revision_summary(obj)['revision_date']
-        return revision_date.isoformat() if revision_date else None
-
-    def get_description(self, obj):
-        return self.get_revision_summary(obj)['description']
-
-    def get_sellingAmount(self, obj):
-        selling_amount = self.get_revision_summary(obj)['selling_amount']
-        return f'{selling_amount.quantize(Decimal("0.01"))}'
+        return data
 
     def create(self, validated_data):
         client_id = validated_data.pop('clientId', None)
@@ -378,6 +410,406 @@ class TenderLogSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
+
+
+class ContractRevenueVariationSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)
+    variationNumber = serializers.CharField(source='variation_number')
+
+    class Meta:
+        model = ContractRevenueVariation
+        fields = [
+            'id',
+            'variationNumber',
+            'amount',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class ContractRevenueSerializer(serializers.ModelSerializer):
+    projectNumber = serializers.CharField(source='project_number')
+    projectName = serializers.CharField(source='project_name')
+    contractValue = serializers.DecimalField(
+        source='contract_value',
+        max_digits=16,
+        decimal_places=2,
+    )
+    startDate = serializers.DateField(
+        source='start_date',
+        required=False,
+        allow_null=True,
+    )
+    completionDate = serializers.DateField(
+        source='completion_date',
+        required=False,
+        allow_null=True,
+    )
+    budgetMaterial = serializers.DecimalField(
+        source='budget_material',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetMachining = serializers.DecimalField(
+        source='budget_machining',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetCoating = serializers.DecimalField(
+        source='budget_coating',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetConsumables = serializers.DecimalField(
+        source='budget_consumables',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetSubcontracts = serializers.DecimalField(
+        source='budget_subcontracts',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetProductionLabour = serializers.DecimalField(
+        source='budget_production_labour',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetFreightCustom = serializers.DecimalField(
+        source='budget_freight_custom',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetInstallationLabour = serializers.DecimalField(
+        source='budget_installation_labour',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetPrelims = serializers.DecimalField(
+        source='budget_prelims',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetFoh = serializers.DecimalField(
+        source='budget_foh',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetCommitments = serializers.DecimalField(
+        source='budget_commitments',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    budgetContingencies = serializers.DecimalField(
+        source='budget_contingencies',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variations = ContractRevenueVariationSerializer(many=True, required=False)
+
+    class Meta:
+        model = ContractRevenue
+        fields = [
+            'id',
+            'projectNumber',
+            'projectName',
+            'contractValue',
+            'startDate',
+            'completionDate',
+            'budgetMaterial',
+            'budgetMachining',
+            'budgetCoating',
+            'budgetConsumables',
+            'budgetSubcontracts',
+            'budgetProductionLabour',
+            'budgetFreightCustom',
+            'budgetInstallationLabour',
+            'budgetPrelims',
+            'budgetFoh',
+            'budgetCommitments',
+            'budgetContingencies',
+            'variations',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        variations_data = validated_data.pop('variations', [])
+        revenue = ContractRevenue.objects.create(**validated_data)
+        self.save_variations(revenue, variations_data)
+        return revenue
+
+    def update(self, instance, validated_data):
+        variations_data = validated_data.pop('variations', None)
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+
+        instance.save()
+
+        if variations_data is not None:
+            instance.variations.all().delete()
+            self.save_variations(instance, variations_data)
+
+        return instance
+
+    def save_variations(self, revenue, variations_data):
+        for index, variation_data in enumerate(variations_data, start=1):
+            variation_data.pop('id', None)
+            variation_number = variation_data.get('variation_number') or f'VO# {index}'
+            ContractRevenueVariation.objects.create(
+                revenue=revenue,
+                variation_number=variation_number,
+                amount=variation_data.get('amount') or Decimal('0.00'),
+            )
+
+
+class ContractVariationLogSerializer(serializers.ModelSerializer):
+    projectNumber = serializers.CharField(source='project_number')
+    projectName = serializers.CharField(source='project_name')
+    rfvNumber = serializers.CharField(
+        source='rfv_number',
+        required=False,
+        allow_blank=True,
+    )
+    clientVariationNumber = serializers.CharField(
+        source='client_variation_number',
+        required=False,
+        allow_blank=True,
+    )
+    documentRef = serializers.CharField(
+        source='document_ref',
+        required=False,
+        allow_blank=True,
+    )
+    submittedAmount = serializers.DecimalField(
+        source='submitted_amount',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    armLetterRef = serializers.CharField(
+        source='arm_letter_ref',
+        required=False,
+        allow_blank=True,
+    )
+    submittedDate = serializers.DateField(
+        source='submitted_date',
+        required=False,
+        allow_null=True,
+    )
+    approvedAmount = serializers.DecimalField(
+        source='approved_amount',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    clientLetterRef = serializers.CharField(
+        source='client_letter_ref',
+        required=False,
+        allow_blank=True,
+    )
+    approvedDate = serializers.DateField(
+        source='approved_date',
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = ContractVariationLog
+        fields = [
+            'id',
+            'projectNumber',
+            'projectName',
+            'rfvNumber',
+            'clientVariationNumber',
+            'description',
+            'documentRef',
+            'submittedAmount',
+            'armLetterRef',
+            'submittedDate',
+            'approvedAmount',
+            'clientLetterRef',
+            'approvedDate',
+            'status',
+            'remarks',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ContractPaymentLogSerializer(serializers.ModelSerializer):
+    projectNumber = serializers.CharField(source='project_number')
+    projectName = serializers.CharField(source='project_name')
+    submittedDate = serializers.DateField(
+        source='submitted_date',
+        required=False,
+        allow_null=True,
+    )
+    approvedDate = serializers.DateField(
+        source='approved_date',
+        required=False,
+        allow_null=True,
+    )
+    submittedAdvance = serializers.DecimalField(
+        source='submitted_advance',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    submittedRecoveryAdvance = serializers.DecimalField(
+        source='submitted_recovery_advance',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    grossSubmittedAmount = serializers.DecimalField(
+        source='gross_submitted_amount',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    submittedRetention = serializers.DecimalField(
+        source='submitted_retention',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    submittedReleaseRetention = serializers.DecimalField(
+        source='submitted_release_retention',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    netSubmittedAmount = serializers.DecimalField(
+        source='net_submitted_amount',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    submittedVat = serializers.DecimalField(
+        source='submitted_vat',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    netSubmittedIncVat = serializers.DecimalField(
+        source='net_submitted_inc_vat',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    approvedAdvance = serializers.DecimalField(
+        source='approved_advance',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    approvedRecoveryAdvance = serializers.DecimalField(
+        source='approved_recovery_advance',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    grossApprovedAmount = serializers.DecimalField(
+        source='gross_approved_amount',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    approvedRetention = serializers.DecimalField(
+        source='approved_retention',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    approvedReleaseRetention = serializers.DecimalField(
+        source='approved_release_retention',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    netApprovedAmount = serializers.DecimalField(
+        source='net_approved_amount',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    approvedVat = serializers.DecimalField(
+        source='approved_vat',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    netApprovedIncVat = serializers.DecimalField(
+        source='net_approved_inc_vat',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    dueDate = serializers.DateField(
+        source='due_date',
+        required=False,
+        allow_null=True,
+    )
+    paidDate = serializers.DateField(
+        source='paid_date',
+        required=False,
+        allow_null=True,
+    )
+    forecastDate = serializers.DateField(
+        source='forecast_date',
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = ContractPaymentLog
+        fields = [
+            'id',
+            'projectNumber',
+            'projectName',
+            'sn',
+            'submittedDate',
+            'approvedDate',
+            'submittedAdvance',
+            'submittedRecoveryAdvance',
+            'grossSubmittedAmount',
+            'submittedRetention',
+            'submittedReleaseRetention',
+            'netSubmittedAmount',
+            'submittedVat',
+            'netSubmittedIncVat',
+            'approvedAdvance',
+            'approvedRecoveryAdvance',
+            'grossApprovedAmount',
+            'approvedRetention',
+            'approvedReleaseRetention',
+            'netApprovedAmount',
+            'approvedVat',
+            'netApprovedIncVat',
+            'dueDate',
+            'paidDate',
+            'forecastDate',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class BoqItemSerializer(serializers.ModelSerializer):
@@ -470,18 +902,18 @@ def serialize_tender_costing(costing):
         'id': costing.id,
         'boqItemId': boq_item.id,
         'tenderNumber': boq_item.tender_number,
-        'material': serialize_estimate_line(costing, EstimateCostLine.MATERIAL),
+        'material': serialize_estimate_lines(costing, EstimateCostLine.MATERIAL),
         'productionLabour': serialize_labour_lines(
             costing,
             LabourCostLine.PRODUCTION_LABOUR,
         ),
-        'machining': serialize_estimate_line(costing, EstimateCostLine.MACHINING),
-        'coating': serialize_estimate_line(costing, EstimateCostLine.COATING),
-        'consumable': serialize_estimate_line(
+        'machining': serialize_estimate_lines(costing, EstimateCostLine.MACHINING),
+        'coating': serialize_estimate_lines(costing, EstimateCostLine.COATING),
+        'consumable': serialize_estimate_lines(
             costing,
             EstimateCostLine.CONSUMABLE,
         ),
-        'subcontract': serialize_estimate_line(
+        'subcontract': serialize_estimate_lines(
             costing,
             EstimateCostLine.SUBCONTRACT,
         ),
@@ -493,14 +925,17 @@ def serialize_tender_costing(costing):
     }
 
 
-def serialize_estimate_line(costing, category):
-    line = costing.estimate_lines.filter(category=category).select_related('item').first()
-
-    return {
-        'itemId': line.item_id if line else '',
-        'quantity': line.quantity if line else Decimal('0.00'),
-        'wastagePercent': line.wastage_percent if line else Decimal('0.00'),
-    }
+def serialize_estimate_lines(costing, category):
+    return [
+        {
+            'itemId': line.item_id if line else '',
+            'quantity': line.quantity if line else Decimal('0.00'),
+            'wastagePercent': line.wastage_percent if line else Decimal('0.00'),
+        }
+        for line in costing.estimate_lines.filter(category=category)
+        .select_related('item')
+        .order_by('id')
+    ]
 
 
 def serialize_labour_lines(costing, category, include_stages=True):
@@ -510,12 +945,7 @@ def serialize_labour_lines(costing, category, include_stages=True):
     }
 
     if not include_stages:
-        line = lines.get(('Installation', 'skilled'))
-
-        return {
-            'itemId': line.item_id if line else '',
-            'hours': line.hours if line else Decimal('0.00'),
-        }
+        return serialize_stage_labour_line(lines, 'Installation')
 
     return {
         stage: serialize_stage_labour_line(lines, stage)
@@ -524,28 +954,24 @@ def serialize_labour_lines(costing, category, include_stages=True):
 
 
 def serialize_stage_labour_line(lines, stage):
-    line = lines.get((stage, 'skilled'))
-
-    if not line:
-        line = next((value for key, value in lines.items() if key[0] == stage), None)
-
     return {
-        'itemId': line.item_id if line else '',
-        'hours': line.hours if line else Decimal('0.00'),
+        'skilledHours': get_labour_hours(lines, stage, 'skilled'),
+        'semiSkilledHours': get_labour_hours(lines, stage, 'semiSkilled'),
+        'helperHours': get_labour_hours(lines, stage, 'helper'),
     }
 
 
 def save_tender_costing(boq_item, data):
     costing, _ = TenderCosting.objects.get_or_create(boq_item=boq_item)
 
-    save_estimate_line(costing, EstimateCostLine.MATERIAL, data.get('material', {}))
-    save_estimate_line(costing, EstimateCostLine.MACHINING, data.get('machining', {}))
-    save_estimate_line(costing, EstimateCostLine.COATING, data.get('coating', {}))
-    save_estimate_line(costing, EstimateCostLine.CONSUMABLE, data.get('consumable', {}))
-    save_estimate_line(
+    save_estimate_lines(costing, EstimateCostLine.MATERIAL, data.get('material', []))
+    save_estimate_lines(costing, EstimateCostLine.MACHINING, data.get('machining', []))
+    save_estimate_lines(costing, EstimateCostLine.COATING, data.get('coating', []))
+    save_estimate_lines(costing, EstimateCostLine.CONSUMABLE, data.get('consumable', []))
+    save_estimate_lines(
         costing,
         EstimateCostLine.SUBCONTRACT,
-        data.get('subcontract', {}),
+        data.get('subcontract', []),
     )
     save_labour_lines(
         costing,
@@ -562,58 +988,79 @@ def save_tender_costing(boq_item, data):
     return costing
 
 
-def save_estimate_line(costing, category, data):
-    item = get_master_item(data.get('itemId'))
+def save_estimate_lines(costing, category, data):
+    rows = data if isinstance(data, list) else [data] if data else []
 
-    EstimateCostLine.objects.update_or_create(
+    EstimateCostLine.objects.filter(
         costing=costing,
         category=category,
-        defaults={
-            'item': item,
-            'quantity': to_decimal(data.get('quantity')),
-            'wastage_percent': to_decimal(data.get('wastagePercent')),
-        },
-    )
+    ).delete()
+
+    for row in rows:
+        item = get_master_item(row.get('itemId'))
+        quantity = to_decimal(row.get('quantity'))
+        wastage_percent = to_decimal(row.get('wastagePercent'))
+
+        if not item and quantity == Decimal('0.00') and wastage_percent == Decimal('0.00'):
+            continue
+
+        EstimateCostLine.objects.create(
+            costing=costing,
+            category=category,
+            item=item,
+            quantity=quantity,
+            wastage_percent=wastage_percent,
+        )
 
 
 def save_labour_lines(costing, category, data, include_stages=True):
+    LabourCostLine.objects.filter(
+        costing=costing,
+        category=category,
+    ).delete()
+
     if not include_stages:
-        LabourCostLine.objects.filter(
-            costing=costing,
-            category=category,
-        ).exclude(stage='Installation', role='skilled').delete()
-        LabourCostLine.objects.update_or_create(
-            costing=costing,
-            category=category,
-            stage='Installation',
-            role='skilled',
-            defaults={
-                'item': get_master_item(data.get('itemId')),
-                'hours': to_decimal(data.get('hours')),
-                'rate': Decimal('0.00'),
-            },
-        )
+        save_labour_stage_lines(costing, category, 'Installation', data or {})
         return
 
     for stage in LABOUR_STAGE_NAMES:
-        stage_data = data.get(stage, {})
+        save_labour_stage_lines(costing, category, stage, data.get(stage, {}))
 
-        LabourCostLine.objects.filter(
+
+def save_labour_stage_lines(costing, category, stage, data):
+    for role, field_name in LABOUR_ROLE_FIELD_MAP.items():
+        hours = to_decimal(data.get(field_name))
+        item = get_labour_master_item(role)
+
+        if hours == Decimal('0.00') and not item:
+            continue
+
+        LabourCostLine.objects.create(
             costing=costing,
             category=category,
             stage=stage,
-        ).exclude(role='skilled').delete()
-        LabourCostLine.objects.update_or_create(
-            costing=costing,
-            category=category,
-            stage=stage,
-            role='skilled',
-            defaults={
-                'item': get_master_item(stage_data.get('itemId')),
-                'hours': to_decimal(stage_data.get('hours')),
-                'rate': Decimal('0.00'),
-            },
+            role=role,
+            item=item,
+            hours=hours,
+            rate=item.rate if item else Decimal('0.00'),
         )
+
+
+def get_labour_hours(lines, stage, role):
+    line = lines.get((stage, role))
+
+    return line.hours if line else Decimal('0.00')
+
+
+def get_labour_master_item(role):
+    for item_description in LABOUR_ROLE_NAME_MAP.get(role, []):
+        item = MasterListItem.objects.filter(
+            item_description__iexact=item_description
+        ).first()
+        if item:
+            return item
+
+    return None
 
 
 def get_master_item(value):

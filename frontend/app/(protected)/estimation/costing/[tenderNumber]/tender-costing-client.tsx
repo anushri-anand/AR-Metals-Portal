@@ -6,16 +6,20 @@ import {
   BoqItem,
   EstimateItem,
   EstimateItemWithWastage,
-  LabourValue,
+  LabourHours,
   ProductionLabourDetails,
   LabourStageName,
   MasterListItem,
   TenderCosting,
   calculateCostSummary,
+  createEmptyEstimateItem,
+  createEmptyEstimateItemWithWastage,
   createEmptyTenderCosting,
   formatMoney,
   getBoqItems,
   getEstimateItemAmount,
+  getEstimateItemsAmount,
+  getEstimateItemsWithWastageAmount,
   getEstimateItemWithWastageAmount,
   getEstimateItemWithWastageQuantity,
   getInstallationLabourUnitCost,
@@ -66,7 +70,10 @@ export default function TenderCostingClient({
         setMasterItems(savedMasterItems)
         setCosting(
           savedCosting ||
-            createEmptyTenderCosting(selectedBoqItem.id, selectedBoqItem.tenderNumber)
+            createEmptyTenderCosting(
+              selectedBoqItem.id,
+              selectedBoqItem.tenderNumber
+            )
         )
       } catch (err) {
         setError(
@@ -93,40 +100,72 @@ export default function TenderCostingClient({
         })
       : null
 
-  function updateSimpleSection(
+  function updateSimpleSectionItem(
     section: SimpleSectionName,
+    index: number,
     field: keyof EstimateItem,
     value: string
   ) {
+    setCosting((prev) => {
+      if (!prev) return prev
+
+      return {
+        ...prev,
+        [section]: prev[section].map((item, itemIndex) =>
+          itemIndex === index
+            ? {
+                ...item,
+                [field]: field === 'quantity' ? Number(value || 0) : value,
+              }
+            : item
+        ),
+      }
+    })
+  }
+
+  function addSimpleSectionItem(section: SimpleSectionName) {
     setCosting((prev) =>
       prev
         ? {
             ...prev,
-            [section]: {
-              ...prev[section],
-              [field]: field === 'quantity' ? Number(value || 0) : value,
-            },
+            [section]: [...prev[section], createEmptyEstimateItem()],
           }
         : prev
     )
   }
 
-  function updateWastageSection(
+  function updateWastageSectionItem(
     section: WastageSectionName,
+    index: number,
     field: keyof EstimateItemWithWastage,
     value: string
   ) {
+    setCosting((prev) => {
+      if (!prev) return prev
+
+      return {
+        ...prev,
+        [section]: prev[section].map((item, itemIndex) =>
+          itemIndex === index
+            ? {
+                ...item,
+                [field]:
+                  field === 'quantity' || field === 'wastagePercent'
+                    ? Number(value || 0)
+                    : value,
+              }
+            : item
+        ),
+      }
+    })
+  }
+
+  function addWastageSectionItem(section: WastageSectionName) {
     setCosting((prev) =>
       prev
         ? {
             ...prev,
-            [section]: {
-              ...prev[section],
-              [field]:
-                field === 'quantity' || field === 'wastagePercent'
-                  ? Number(value || 0)
-                  : value,
-            },
+            [section]: [...prev[section], createEmptyEstimateItemWithWastage()],
           }
         : prev
     )
@@ -134,7 +173,7 @@ export default function TenderCostingClient({
 
   function updateProductionLabourSection(
     stage: LabourStageName,
-    field: keyof LabourValue,
+    field: keyof LabourHours,
     value: string
   ) {
     setCosting((prev) => {
@@ -146,14 +185,17 @@ export default function TenderCostingClient({
           ...prev.productionLabour,
           [stage]: {
             ...prev.productionLabour[stage],
-            [field]: field === 'hours' ? Number(value || 0) : value,
+            [field]: Number(value || 0),
           },
         },
       }
     })
   }
 
-  function updateInstallationLabourSection(field: keyof LabourValue, value: string) {
+  function updateInstallationLabourSection(
+    field: keyof LabourHours,
+    value: string
+  ) {
     setCosting((prev) => {
       if (!prev) return prev
 
@@ -161,7 +203,7 @@ export default function TenderCostingClient({
         ...prev,
         installationLabour: {
           ...prev.installationLabour,
-          [field]: field === 'hours' ? Number(value || 0) : value,
+          [field]: Number(value || 0),
         },
       }
     })
@@ -216,13 +258,14 @@ export default function TenderCostingClient({
         )}
       </div>
 
-      <MaterialSection
+      <MultiWastageSection
         title="Material"
-        value={costing.material}
+        values={costing.material}
         masterItems={masterItems}
-        onChange={(field, value) =>
-          updateWastageSection('material', field, value)
+        onChange={(index, field, value) =>
+          updateWastageSectionItem('material', index, field, value)
         }
+        onAdd={() => addWastageSectionItem('material')}
       />
 
       <LabourSection
@@ -234,38 +277,44 @@ export default function TenderCostingClient({
         }
       />
 
-      <SimpleCostSection
+      <MultiSimpleSection
         title="Machining"
-        value={costing.machining}
+        values={costing.machining}
         masterItems={masterItems}
-        onChange={(field, value) =>
-          updateSimpleSection('machining', field, value)
+        onChange={(index, field, value) =>
+          updateSimpleSectionItem('machining', index, field, value)
         }
+        onAdd={() => addSimpleSectionItem('machining')}
       />
 
-      <SimpleCostSection
+      <MultiSimpleSection
         title="Coating"
-        value={costing.coating}
+        values={costing.coating}
         masterItems={masterItems}
-        onChange={(field, value) => updateSimpleSection('coating', field, value)}
+        onChange={(index, field, value) =>
+          updateSimpleSectionItem('coating', index, field, value)
+        }
+        onAdd={() => addSimpleSectionItem('coating')}
       />
 
-      <MaterialSection
+      <MultiWastageSection
         title="Consumable"
-        value={costing.consumable}
+        values={costing.consumable}
         masterItems={masterItems}
-        onChange={(field, value) =>
-          updateWastageSection('consumable', field, value)
+        onChange={(index, field, value) =>
+          updateWastageSectionItem('consumable', index, field, value)
         }
+        onAdd={() => addWastageSectionItem('consumable')}
       />
 
-      <SimpleCostSection
+      <MultiSimpleSection
         title="Subcontract"
-        value={costing.subcontract}
+        values={costing.subcontract}
         masterItems={masterItems}
-        onChange={(field, value) =>
-          updateSimpleSection('subcontract', field, value)
+        onChange={(index, field, value) =>
+          updateSimpleSectionItem('subcontract', index, field, value)
         }
+        onAdd={() => addSimpleSectionItem('subcontract')}
       />
 
       <InstallationLabourSection
@@ -320,105 +369,167 @@ export default function TenderCostingClient({
   )
 }
 
-function MaterialSection({
+function MultiWastageSection({
   title,
-  value,
+  values,
   masterItems,
   onChange,
+  onAdd,
 }: {
   title: string
-  value: EstimateItemWithWastage
+  values: EstimateItemWithWastage[]
   masterItems: MasterListItem[]
-  onChange: (field: keyof EstimateItemWithWastage, value: string) => void
+  onChange: (
+    index: number,
+    field: keyof EstimateItemWithWastage,
+    value: string
+  ) => void
+  onAdd: () => void
 }) {
-  const masterItem = getMasterItem(masterItems, value.itemId)
-  const quantityIncWastage = getEstimateItemWithWastageQuantity(value)
-  const unitCost = getEstimateItemWithWastageAmount(value, masterItems)
+  const unitCost = getEstimateItemsWithWastageAmount(values, masterItems)
 
   return (
     <Section title={title} unitCost={unitCost}>
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-        <Field label="Item">
-          <MasterItemSelect
-            value={value.itemId}
-            masterItems={masterItems}
-            onChange={(nextValue) => onChange('itemId', nextValue)}
-          />
-        </Field>
-        <Field label="Qty">
-          <NumberInput
-            value={value.quantity || ''}
-            onChange={(nextValue) => onChange('quantity', nextValue)}
-            placeholder="Qty"
-          />
-        </Field>
-        <Field label="Wastage (%)">
-          <NumberInput
-            value={value.wastagePercent || ''}
-            onChange={(nextValue) => onChange('wastagePercent', nextValue)}
-            placeholder="Wastage %"
-          />
-        </Field>
-        <ReadOnlyField
-          label="Qty Inc Wastage"
-          value={quantityIncWastage ? formatMoney(quantityIncWastage) : ''}
-        />
-        <ReadOnlyField label="Unit" value={masterItem?.unit || ''} />
-        <ReadOnlyField
-          label="Rate"
-          value={masterItem ? formatMoney(masterItem.rate) : ''}
-        />
-        <ReadOnlyField label="PO Ref #" value={masterItem?.poRefNumber || ''} />
-        <ReadOnlyField
-          label="Unit Cost"
-          value={unitCost ? formatMoney(unitCost) : ''}
-        />
+      <div className="space-y-4">
+        {values.map((value, index) => {
+          const masterItem = getMasterItem(masterItems, value.itemId)
+          const quantityIncWastage = getEstimateItemWithWastageQuantity(value)
+          const lineUnitCost = getEstimateItemWithWastageAmount(value, masterItems)
+
+          return (
+            <div key={`${title}-${index}`} className="rounded-xl border border-slate-200 p-4">
+              <h3 className="font-semibold text-slate-900">Item {index + 1}</h3>
+              <div className="mt-4 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+                <Field label="Item">
+                  <MasterItemSelect
+                    value={value.itemId}
+                    masterItems={masterItems}
+                    onChange={(nextValue) => onChange(index, 'itemId', nextValue)}
+                  />
+                </Field>
+                <Field label="Qty">
+                  <NumberInput
+                    value={value.quantity || ''}
+                    onChange={(nextValue) =>
+                      onChange(index, 'quantity', nextValue)
+                    }
+                    placeholder="Qty"
+                  />
+                </Field>
+                <Field label="Wastage (%)">
+                  <NumberInput
+                    value={value.wastagePercent || ''}
+                    onChange={(nextValue) =>
+                      onChange(index, 'wastagePercent', nextValue)
+                    }
+                    placeholder="Wastage %"
+                  />
+                </Field>
+                <ReadOnlyField
+                  label="Qty Inc Wastage"
+                  value={quantityIncWastage ? formatMoney(quantityIncWastage) : ''}
+                />
+                <ReadOnlyField label="Unit" value={masterItem?.unit || ''} />
+                <ReadOnlyField
+                  label="Rate"
+                  value={masterItem ? formatMoney(masterItem.rate) : ''}
+                />
+                <ReadOnlyField
+                  label="PO Ref #"
+                  value={masterItem?.poRefNumber || ''}
+                />
+                <ReadOnlyField
+                  label="Unit Cost"
+                  value={lineUnitCost ? formatMoney(lineUnitCost) : ''}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-6">
+        <button
+          type="button"
+          onClick={onAdd}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+        >
+          Add Item
+        </button>
       </div>
     </Section>
   )
 }
 
-function SimpleCostSection({
+function MultiSimpleSection({
   title,
-  value,
+  values,
   masterItems,
   onChange,
+  onAdd,
 }: {
   title: string
-  value: EstimateItem
+  values: EstimateItem[]
   masterItems: MasterListItem[]
-  onChange: (field: keyof EstimateItem, value: string) => void
+  onChange: (index: number, field: keyof EstimateItem, value: string) => void
+  onAdd: () => void
 }) {
-  const masterItem = getMasterItem(masterItems, value.itemId)
-  const unitCost = getEstimateItemAmount(value, masterItems)
+  const unitCost = getEstimateItemsAmount(values, masterItems)
 
   return (
     <Section title={title} unitCost={unitCost}>
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-        <Field label="Item">
-          <MasterItemSelect
-            value={value.itemId}
-            masterItems={masterItems}
-            onChange={(nextValue) => onChange('itemId', nextValue)}
-          />
-        </Field>
-        <Field label="Qty">
-          <NumberInput
-            value={value.quantity || ''}
-            onChange={(nextValue) => onChange('quantity', nextValue)}
-            placeholder="Qty"
-          />
-        </Field>
-        <ReadOnlyField label="Unit" value={masterItem?.unit || ''} />
-        <ReadOnlyField
-          label="Rate"
-          value={masterItem ? formatMoney(masterItem.rate) : ''}
-        />
-        <ReadOnlyField label="PO Ref #" value={masterItem?.poRefNumber || ''} />
-        <ReadOnlyField
-          label="Unit Cost"
-          value={unitCost ? formatMoney(unitCost) : ''}
-        />
+      <div className="space-y-4">
+        {values.map((value, index) => {
+          const masterItem = getMasterItem(masterItems, value.itemId)
+          const lineUnitCost = getEstimateItemAmount(value, masterItems)
+
+          return (
+            <div key={`${title}-${index}`} className="rounded-xl border border-slate-200 p-4">
+              <h3 className="font-semibold text-slate-900">Item {index + 1}</h3>
+              <div className="mt-4 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+                <Field label="Item">
+                  <MasterItemSelect
+                    value={value.itemId}
+                    masterItems={masterItems}
+                    onChange={(nextValue) => onChange(index, 'itemId', nextValue)}
+                  />
+                </Field>
+                <Field label="Qty">
+                  <NumberInput
+                    value={value.quantity || ''}
+                    onChange={(nextValue) =>
+                      onChange(index, 'quantity', nextValue)
+                    }
+                    placeholder="Qty"
+                  />
+                </Field>
+                <ReadOnlyField label="Unit" value={masterItem?.unit || ''} />
+                <ReadOnlyField
+                  label="Rate"
+                  value={masterItem ? formatMoney(masterItem.rate) : ''}
+                />
+                <ReadOnlyField
+                  label="PO Ref #"
+                  value={masterItem?.poRefNumber || ''}
+                />
+                <ReadOnlyField
+                  label="Unit Cost"
+                  value={lineUnitCost ? formatMoney(lineUnitCost) : ''}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-6">
+        <button
+          type="button"
+          onClick={onAdd}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+        >
+          Add Item
+        </button>
       </div>
     </Section>
   )
@@ -433,11 +544,7 @@ function LabourSection({
   title: string
   value: ProductionLabourDetails
   masterItems: MasterListItem[]
-  onChange: (
-    stage: LabourStageName,
-    field: keyof LabourValue,
-    value: string
-  ) => void
+  onChange: (stage: LabourStageName, field: keyof LabourHours, value: string) => void
 }) {
   const unitCost = getProductionLabourUnitCost(value, masterItems)
 
@@ -447,18 +554,31 @@ function LabourSection({
         {labourStageNames.map((stage) => (
           <div key={stage} className="rounded-xl border border-slate-200 p-4">
             <h3 className="font-semibold text-slate-900">{stage}</h3>
-            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Field label="Item">
-                <MasterItemSelect
-                  value={value[stage].itemId}
-                  masterItems={masterItems}
-                  onChange={(nextValue) => onChange(stage, 'itemId', nextValue)}
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+              <Field label="Skilled Labour (Hours)">
+                <NumberInput
+                  value={value[stage].skilledHours || ''}
+                  onChange={(nextValue) =>
+                    onChange(stage, 'skilledHours', nextValue)
+                  }
+                  placeholder="Hours"
                 />
               </Field>
-              <Field label="Hours">
+              <Field label="Semi-Skilled Labour (Hours)">
                 <NumberInput
-                  value={value[stage].hours || ''}
-                  onChange={(nextValue) => onChange(stage, 'hours', nextValue)}
+                  value={value[stage].semiSkilledHours || ''}
+                  onChange={(nextValue) =>
+                    onChange(stage, 'semiSkilledHours', nextValue)
+                  }
+                  placeholder="Hours"
+                />
+              </Field>
+              <Field label="Helper (Hours)">
+                <NumberInput
+                  value={value[stage].helperHours || ''}
+                  onChange={(nextValue) =>
+                    onChange(stage, 'helperHours', nextValue)
+                  }
                   placeholder="Hours"
                 />
               </Field>
@@ -477,26 +597,33 @@ function InstallationLabourSection({
   onChange,
 }: {
   title: string
-  value: LabourValue
+  value: LabourHours
   masterItems: MasterListItem[]
-  onChange: (field: keyof LabourValue, value: string) => void
+  onChange: (field: keyof LabourHours, value: string) => void
 }) {
   const unitCost = getInstallationLabourUnitCost(value, masterItems)
 
   return (
     <Section title={title} unitCost={unitCost}>
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <Field label="Item">
-          <MasterItemSelect
-            value={value.itemId}
-            masterItems={masterItems}
-            onChange={(nextValue) => onChange('itemId', nextValue)}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Field label="Skilled Labour (Hours)">
+          <NumberInput
+            value={value.skilledHours || ''}
+            onChange={(nextValue) => onChange('skilledHours', nextValue)}
+            placeholder="Hours"
           />
         </Field>
-        <Field label="Hours">
+        <Field label="Semi-Skilled Labour (Hours)">
           <NumberInput
-            value={value.hours || ''}
-            onChange={(nextValue) => onChange('hours', nextValue)}
+            value={value.semiSkilledHours || ''}
+            onChange={(nextValue) => onChange('semiSkilledHours', nextValue)}
+            placeholder="Hours"
+          />
+        </Field>
+        <Field label="Helper (Hours)">
+          <NumberInput
+            value={value.helperHours || ''}
+            onChange={(nextValue) => onChange('helperHours', nextValue)}
             placeholder="Hours"
           />
         </Field>
@@ -566,11 +693,13 @@ function MasterItemSelect({
   onChange: (value: string) => void
 }) {
   const selectedItem = getMasterItem(masterItems, value)
-  const [query, setQuery] = useState(selectedItem?.itemDescription || '')
+  const [query, setQuery] = useState('')
   const [isOpen, setIsOpen] = useState(false)
+  const inputValue = query || selectedItem?.itemDescription || ''
+
   const filteredItems = masterItems
     .filter((item) =>
-      item.itemDescription.toLowerCase().includes(query.toLowerCase())
+      item.itemDescription.toLowerCase().includes(inputValue.toLowerCase())
     )
     .slice(0, 8)
 
@@ -592,7 +721,7 @@ function MasterItemSelect({
   return (
     <div className="relative">
       <input
-        value={query}
+        value={inputValue}
         onChange={(e) => {
           const nextQuery = e.target.value
           setQuery(nextQuery)
@@ -618,9 +747,14 @@ function MasterItemSelect({
                 setQuery(item.itemDescription)
                 setIsOpen(false)
               }}
-              className="block w-full px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50"
+              className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
             >
-              {item.itemDescription}
+              <div className="font-medium text-slate-900">
+                {item.itemDescription}
+              </div>
+              <div className="text-xs text-slate-500">
+                {item.unit} | {formatMoney(item.rate)}
+              </div>
             </button>
           ))}
         </div>
@@ -654,7 +788,7 @@ function SummaryCard({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
       <p className="text-sm text-slate-600">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-slate-900">
+      <p className="mt-2 text-xl font-semibold text-slate-900">
         {formatMoney(value)}
       </p>
     </div>

@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import PaymentEntry, PaymentPhase, PurchaseOrder, Vendor
+from .models import PaymentDeliveryItem, PaymentEntry, PaymentPhase, PurchaseOrder, Vendor
 from .serializers import (
     PaymentEntryCreateSerializer,
     PaymentEntrySerializer,
@@ -12,6 +12,7 @@ from .serializers import (
     PurchaseOrderEntrySerializer,
     PurchaseOrderSerializer,
     VendorSerializer,
+    parse_purchase_order_items,
 )
 
 
@@ -93,14 +94,39 @@ class PaymentEntryCreateAPIView(APIView):
         data = serializer.validated_data
 
         purchase_order = PurchaseOrder.objects.get(po_number=data['po_number'])
+        purchase_order_items = parse_purchase_order_items(purchase_order)
+        received_quantities = {
+            item['line_number']: item.get('received_quantity', 0)
+            for item in data.get('delivery_items', [])
+        }
+        delivery_total = sum(
+            item['rate'] * received_quantities.get(item['line_number'], 0)
+            for item in purchase_order_items
+        )
 
         with transaction.atomic():
             payment_entry = PaymentEntry.objects.create(
                 purchase_order=purchase_order,
                 advance=data.get('advance', 0),
-                delivery=data.get('delivery', 0),
+                recovery_advance=data.get('recovery_advance', 0),
+                delivery=delivery_total or data.get('delivery', 0),
                 retention=data.get('retention', 0),
+                release_retention=data.get('release_retention', 0),
             )
+
+            for item in purchase_order_items:
+                PaymentDeliveryItem.objects.create(
+                    payment_entry=payment_entry,
+                    line_number=item['line_number'],
+                    item_description=item['item_description'],
+                    quantity=item['quantity'],
+                    unit=item['unit'],
+                    rate=item['rate'],
+                    received_quantity=received_quantities.get(
+                        item['line_number'],
+                        0,
+                    ),
+                )
 
             for index, phase in enumerate(data['phases'], start=1):
                 PaymentPhase.objects.create(
@@ -109,8 +135,11 @@ class PaymentEntryCreateAPIView(APIView):
                     amount=phase['amount'],
                     due_date=phase['due_date'],
                     forecast_date=phase['forecast_date'],
-                    paid=phase.get('paid', 0),
+                    paid=phase.get('paid_inc_vat', 0),
+                    vat=phase.get('vat', 0),
                     paid_date=phase.get('paid_date'),
+                    invoice_no=phase.get('invoice_no', ''),
+                    invoice_date=phase.get('invoice_date'),
                 )
 
         return Response(
@@ -126,7 +155,7 @@ class PaymentEntryListAPIView(APIView):
         payment_entries = PaymentEntry.objects.select_related(
             'purchase_order',
             'purchase_order__supplier',
-        ).prefetch_related('phases')
+        ).prefetch_related('phases', 'delivery_items')
 
         serializer = PaymentEntrySerializer(payment_entries, many=True)
         return Response(serializer.data)
@@ -151,8 +180,21 @@ class PaymentEntryUpdateAPIView(APIView):
                     payment_entry=payment_entry,
                 )
                 phase.forecast_date = phase_data['forecast_date']
-                phase.paid = phase_data['paid']
+                phase.paid = phase_data['paid_inc_vat']
+                phase.vat = phase_data['vat']
                 phase.paid_date = phase_data.get('paid_date')
-                phase.save(update_fields=['forecast_date', 'paid', 'paid_date', 'updated_at'])
+                phase.invoice_no = phase_data.get('invoice_no', '')
+                phase.invoice_date = phase_data.get('invoice_date')
+                phase.save(
+                    update_fields=[
+                        'forecast_date',
+                        'paid',
+                        'vat',
+                        'paid_date',
+                        'invoice_no',
+                        'invoice_date',
+                        'updated_at',
+                    ]
+                )
 
         return Response(PaymentEntrySerializer(payment_entry).data)

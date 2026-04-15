@@ -12,10 +12,22 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import BoqItem, ClientData, MasterListItem, TenderLog, TenderCosting
+from .models import (
+    BoqItem,
+    ClientData,
+    ContractPaymentLog,
+    ContractRevenue,
+    ContractVariationLog,
+    MasterListItem,
+    TenderLog,
+    TenderCosting,
+)
 from .serializers import (
     BoqItemSerializer,
     ClientDataSerializer,
+    ContractPaymentLogSerializer,
+    ContractRevenueSerializer,
+    ContractVariationLogSerializer,
     MasterListItemSerializer,
     TenderLogSerializer,
     save_tender_costing,
@@ -112,6 +124,86 @@ class MasterListDetailAPIView(APIView):
     def delete(self, request, pk):
         MasterListItem.objects.filter(pk=pk).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ContractRevenueAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        revenues = ContractRevenue.objects.prefetch_related('variations').all()
+        project_number = request.query_params.get('project_number')
+
+        if project_number:
+            revenues = revenues.filter(project_number=project_number)
+
+        serializer = ContractRevenueSerializer(revenues, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = ContractRevenueSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        revenue = serializer.save()
+        return Response(
+            ContractRevenueSerializer(revenue).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ContractRevenueDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        revenue = ContractRevenue.objects.get(pk=pk)
+        serializer = ContractRevenueSerializer(revenue, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(ContractRevenueSerializer(revenue).data)
+
+
+class ContractVariationLogAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        logs = ContractVariationLog.objects.all()
+        project_number = request.query_params.get('project_number')
+
+        if project_number:
+            logs = logs.filter(project_number=project_number)
+
+        serializer = ContractVariationLogSerializer(logs, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = ContractVariationLogSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        variation = serializer.save()
+        return Response(
+            ContractVariationLogSerializer(variation).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ContractPaymentLogAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        logs = ContractPaymentLog.objects.all()
+        project_number = request.query_params.get('project_number')
+
+        if project_number:
+            logs = logs.filter(project_number=project_number)
+
+        serializer = ContractPaymentLogSerializer(logs, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = ContractPaymentLogSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payment = serializer.save()
+        return Response(
+            ContractPaymentLogSerializer(payment).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class BoqItemListAPIView(APIView):

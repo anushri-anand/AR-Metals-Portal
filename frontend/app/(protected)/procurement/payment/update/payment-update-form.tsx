@@ -9,8 +9,12 @@ type ApiPhase = {
   amount: string
   due_date: string
   forecast_date: string
-  paid: string
+  paid_inc_vat: string
+  vat: string
+  paid_exc_vat: string
   paid_date: string | null
+  invoice_no: string
+  invoice_date: string | null
 }
 
 type PaymentRecord = {
@@ -19,8 +23,11 @@ type PaymentRecord = {
   project_name: string
   supplier_name: string
   advance: string
+  recovery_advance: string
   delivery: string
   retention: string
+  release_retention: string
+  net_payable_amount: string
   phases: ApiPhase[]
 }
 
@@ -29,8 +36,11 @@ type Phase = {
   amount: string
   dueDate: string
   forecastDate: string
-  paid: string
+  paidIncVat: string
+  vat: string
   paidDate: string
+  invoiceNo: string
+  invoiceDate: string
 }
 
 type FormState = {
@@ -38,8 +48,11 @@ type FormState = {
   projectName: string
   supplierName: string
   advance: string
+  recoveryAdvance: string
   delivery: string
   retention: string
+  releaseRetention: string
+  netPayableAmount: string
   phases: Phase[]
 }
 
@@ -48,8 +61,11 @@ const initialForm: FormState = {
   projectName: '',
   supplierName: '',
   advance: '',
+  recoveryAdvance: '',
   delivery: '',
   retention: '',
+  releaseRetention: '',
+  netPayableAmount: '',
   phases: [],
 }
 
@@ -91,15 +107,21 @@ export default function PaymentUpdateForm() {
       projectName: record.project_name,
       supplierName: record.supplier_name,
       advance: record.advance,
+      recoveryAdvance: record.recovery_advance,
       delivery: record.delivery,
       retention: record.retention,
+      releaseRetention: record.release_retention,
+      netPayableAmount: record.net_payable_amount,
       phases: record.phases.map((phase) => ({
         id: phase.id,
         amount: phase.amount,
         dueDate: phase.due_date,
         forecastDate: phase.forecast_date,
-        paid: phase.paid,
+        paidIncVat: phase.paid_inc_vat,
+        vat: phase.vat,
         paidDate: phase.paid_date || '',
+        invoiceNo: phase.invoice_no || '',
+        invoiceDate: phase.invoice_date || '',
       })),
     })
   }
@@ -121,7 +143,13 @@ export default function PaymentUpdateForm() {
 
   function handlePhaseChange(
     index: number,
-    field: 'forecastDate' | 'paid' | 'paidDate',
+    field:
+      | 'forecastDate'
+      | 'paidIncVat'
+      | 'vat'
+      | 'paidDate'
+      | 'invoiceNo'
+      | 'invoiceDate',
     value: string
   ) {
     setForm((prev) => ({
@@ -151,8 +179,11 @@ export default function PaymentUpdateForm() {
           phases: form.phases.map((phase) => ({
             id: phase.id,
             forecast_date: phase.forecastDate,
-            paid: phase.paid || '0',
+            paid_inc_vat: phase.paidIncVat || '0',
+            vat: phase.vat || '0',
             paid_date: phase.paidDate || null,
+            invoice_no: phase.invoiceNo,
+            invoice_date: phase.invoiceDate || null,
           })),
         }),
       })
@@ -178,8 +209,8 @@ export default function PaymentUpdateForm() {
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Payment Update</h1>
         <p className="mt-2 text-slate-700">
-          Select a real payment record and update only forecast date, paid
-          amount, and paid date.
+          Select a real payment record and update forecast date plus invoice
+          payment details.
         </p>
       </div>
 
@@ -257,29 +288,21 @@ export default function PaymentUpdateForm() {
         ) : form.poNumber ? (
           <>
             <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-3">
-              <Field label="Advance">
-                <input
-                  value={form.advance}
-                  readOnly
-                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
-                />
-              </Field>
-
-              <Field label="Delivery">
-                <input
-                  value={form.delivery}
-                  readOnly
-                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
-                />
-              </Field>
-
-              <Field label="Retention">
-                <input
-                  value={form.retention}
-                  readOnly
-                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
-                />
-              </Field>
+              <ReadOnlyField label="Advance" value={form.advance} />
+              <ReadOnlyField
+                label="Recovery of Advance"
+                value={form.recoveryAdvance}
+              />
+              <ReadOnlyField label="Against Delivery" value={form.delivery} />
+              <ReadOnlyField label="Retention" value={form.retention} />
+              <ReadOnlyField
+                label="Release of Retention"
+                value={form.releaseRetention}
+              />
+              <ReadOnlyField
+                label="Net Payable Amount"
+                value={form.netPayableAmount}
+              />
             </div>
 
             <div className="mt-8 space-y-6">
@@ -292,22 +315,9 @@ export default function PaymentUpdateForm() {
                     Phase {index + 1}
                   </h2>
 
-                  <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
-                    <Field label="Amount">
-                      <input
-                        value={phase.amount}
-                        readOnly
-                        className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
-                      />
-                    </Field>
-
-                    <Field label="Due Date">
-                      <input
-                        value={phase.dueDate}
-                        readOnly
-                        className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
-                      />
-                    </Field>
+                  <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+                    <ReadOnlyField label="Amount" value={phase.amount} />
+                    <ReadOnlyField label="Due Date" value={phase.dueDate} />
 
                     <Field label="Forecast Date">
                       <input
@@ -324,18 +334,38 @@ export default function PaymentUpdateForm() {
                       />
                     </Field>
 
-                    <Field label="Paid">
+                    <Field label="Paid Inc VAT">
                       <input
                         type="number"
                         step="0.01"
-                        value={phase.paid}
+                        value={phase.paidIncVat}
                         onChange={(e) =>
-                          handlePhaseChange(index, 'paid', e.target.value)
+                          handlePhaseChange(index, 'paidIncVat', e.target.value)
                         }
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-                        placeholder="Enter paid amount"
+                        placeholder="Enter paid amount inc VAT"
                       />
                     </Field>
+
+                    <Field label="VAT">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={phase.vat}
+                        onChange={(e) =>
+                          handlePhaseChange(index, 'vat', e.target.value)
+                        }
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                        placeholder="Enter VAT"
+                      />
+                    </Field>
+
+                    <ReadOnlyField
+                      label="Paid Exc VAT"
+                      value={formatMoney(
+                        Number(phase.paidIncVat || 0) - Number(phase.vat || 0)
+                      )}
+                    />
 
                     <Field label="Paid Date">
                       <input
@@ -343,6 +373,28 @@ export default function PaymentUpdateForm() {
                         value={phase.paidDate}
                         onChange={(e) =>
                           handlePhaseChange(index, 'paidDate', e.target.value)
+                        }
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                      />
+                    </Field>
+
+                    <Field label="Invoice No.">
+                      <input
+                        value={phase.invoiceNo}
+                        onChange={(e) =>
+                          handlePhaseChange(index, 'invoiceNo', e.target.value)
+                        }
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                        placeholder="Enter invoice number"
+                      />
+                    </Field>
+
+                    <Field label="Invoice Date">
+                      <input
+                        type="date"
+                        value={phase.invoiceDate}
+                        onChange={(e) =>
+                          handlePhaseChange(index, 'invoiceDate', e.target.value)
                         }
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
                       />
@@ -385,4 +437,20 @@ function Field({
       {children}
     </div>
   )
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <Field label={label}>
+      <input
+        value={value || '-'}
+        readOnly
+        className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
+      />
+    </Field>
+  )
+}
+
+function formatMoney(value: number) {
+  return value.toFixed(2)
 }

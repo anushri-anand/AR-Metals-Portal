@@ -51,13 +51,15 @@ const tableWidth =
 type NumericBoqField =
   | 'quantity'
   | 'freightCustomDutyPercent'
+
+type CommonValueField =
   | 'prelimsPercent'
   | 'fohPercent'
   | 'commitmentsPercent'
   | 'contingenciesPercent'
   | 'markup'
 
-type PercentField = Exclude<NumericBoqField, 'quantity'>
+type CommonValues = Record<CommonValueField, number>
 
 function createEmptyRow(sn = '1'): BoqItem {
   return {
@@ -79,6 +81,16 @@ function createEmptyRow(sn = '1'): BoqItem {
   }
 }
 
+function createEmptyCommonValues(): CommonValues {
+  return {
+    prelimsPercent: 0,
+    fohPercent: 0,
+    commitmentsPercent: 0,
+    contingenciesPercent: 0,
+    markup: 0,
+  }
+}
+
 export default function CostingClient() {
   const [allRows, setAllRows] = useState<BoqItem[]>([])
   const [rows, setRows] = useState<BoqItem[]>([createEmptyRow()])
@@ -88,6 +100,9 @@ export default function CostingClient() {
   const [selectedTenderNumber, setSelectedTenderNumber] = useState('')
   const [revisionNumber, setRevisionNumber] = useState('')
   const [revisionDate, setRevisionDate] = useState('')
+  const [commonValues, setCommonValues] = useState<CommonValues>(
+    createEmptyCommonValues()
+  )
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
@@ -117,6 +132,14 @@ export default function CostingClient() {
           firstTenderNumber,
           firstRevisionNumber
         )
+        const firstRows = firstTenderNumber
+          ? getRowsForTenderRevision(
+              savedBoqItems,
+              firstTenderNumber,
+              firstRevisionNumber
+            )
+          : [createEmptyRow()]
+        const firstCommonValues = getCommonValuesForRows(firstRows)
 
         setAllRows(savedBoqItems)
         setMasterItems(savedMasterItems)
@@ -125,15 +148,8 @@ export default function CostingClient() {
         setSelectedTenderNumber(firstTenderNumber)
         setRevisionNumber(firstRevisionNumber)
         setRevisionDate(firstRevisionDate)
-        setRows(
-          firstTenderNumber
-            ? getRowsForTenderRevision(
-                savedBoqItems,
-                firstTenderNumber,
-                firstRevisionNumber
-              )
-            : [createEmptyRow()]
-        )
+        setCommonValues(firstCommonValues)
+        setRows(applyCommonValuesToRows(firstRows, firstCommonValues))
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'Failed to load costing data.'
@@ -149,27 +165,30 @@ export default function CostingClient() {
   function handleTenderChange(value: string) {
     const nextRevisionNumber = getFirstRevision(allRows, value)
     const nextRevisionDate = getRevisionDate(allRows, value, nextRevisionNumber)
+    const nextRows = value
+      ? getRowsForTenderRevision(allRows, value, nextRevisionNumber)
+      : [createEmptyRow()]
+    const nextCommonValues = getCommonValuesForRows(nextRows)
 
     setSelectedTenderNumber(value)
     setRevisionNumber(nextRevisionNumber)
     setRevisionDate(nextRevisionDate)
-    setRows(
-      value
-        ? getRowsForTenderRevision(allRows, value, nextRevisionNumber)
-        : [createEmptyRow()]
-    )
+    setRows(applyCommonValuesToRows(nextRows, nextCommonValues))
+    setCommonValues(nextCommonValues)
     setMessage('')
     setError('')
   }
 
   function handleRevisionChange(value: string) {
+    const nextRows = selectedTenderNumber
+      ? getRowsForTenderRevision(allRows, selectedTenderNumber, value)
+      : [createEmptyRow()]
+    const nextCommonValues = getCommonValuesForRows(nextRows)
+
     setRevisionNumber(value)
     setRevisionDate(getRevisionDate(allRows, selectedTenderNumber, value))
-    setRows(
-      selectedTenderNumber
-        ? getRowsForTenderRevision(allRows, selectedTenderNumber, value)
-        : [createEmptyRow()]
-    )
+    setRows(applyCommonValuesToRows(nextRows, nextCommonValues))
+    setCommonValues(nextCommonValues)
     setMessage('')
     setError('')
   }
@@ -194,12 +213,15 @@ export default function CostingClient() {
   function handleAddRow() {
     setRows((prev) => [
       ...prev,
-      {
+      applyCommonValuesToRow(
+        {
         ...createEmptyRow(String(prev.length + 1)),
         tenderNumber: selectedTenderNumber,
         revisionNumber,
         revisionDate: revisionDate || null,
-      },
+        },
+        commonValues
+      ),
     ])
   }
 
@@ -214,7 +236,7 @@ export default function CostingClient() {
     const rowsToSave = rows
       .filter((row) => row.clientsBoq || row.description || row.quantity || row.unit)
       .map((row, index) => ({
-        ...row,
+        ...applyCommonValuesToRow(row, commonValues),
         sn: String(index + 1),
         tenderNumber: selectedTenderNumber,
         revisionNumber: revisionNumber.trim(),
@@ -238,8 +260,9 @@ export default function CostingClient() {
       )
 
       setAllRows(savedRows)
-      setRows(savedCurrentRows)
+      setRows(applyCommonValuesToRows(savedCurrentRows, commonValues))
       setRevisionNumber(revisionNumber.trim())
+      setCommonValues(getCommonValuesForRows(savedCurrentRows))
       setMessage('Bill of Quantity saved.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save BOQ.')
@@ -270,7 +293,8 @@ export default function CostingClient() {
         body: formData,
       })
       const importedRows = (data.rows || []).map(
-        (row: Partial<BoqItem>, index: number) => ({
+        (row: Partial<BoqItem>, index: number) =>
+          applyCommonValuesToRow({
           ...createEmptyRow(String(index + 1)),
           sn: row.sn || String(index + 1),
           tenderNumber: selectedTenderNumber,
@@ -279,8 +303,9 @@ export default function CostingClient() {
           clientsBoq: row.clientsBoq || '',
           description: row.description || '',
           quantity: Number(row.quantity || 0),
+          freightCustomDutyPercent: Number(row.freightCustomDutyPercent || 0),
           unit: row.unit || '',
-        })
+          }, commonValues)
       )
 
       setRows(importedRows.length > 0 ? importedRows : [createEmptyRow()])
@@ -361,7 +386,7 @@ export default function CostingClient() {
 
   function handleBoqNumberChange(
     id: string | number,
-    field: PercentField,
+    field: 'freightCustomDutyPercent',
     value: string
   ) {
     const nextRows = rows.map((item) =>
@@ -396,6 +421,25 @@ export default function CostingClient() {
         err instanceof Error ? err.message : 'Failed to update costing value.'
       )
     })
+  }
+
+  function handleCommonValueChange(field: CommonValueField, value: string) {
+    const numericValue = Number(value || 0)
+    const nextCommonValues = {
+      ...commonValues,
+      [field]: numericValue,
+    }
+
+    setCommonValues(nextCommonValues)
+    setRows((prev) => prev.map((row) => applyCommonValuesToRow(row, nextCommonValues)))
+    setAllRows((prev) =>
+      prev.map((row) =>
+        row.tenderNumber === selectedTenderNumber &&
+        row.revisionNumber === revisionNumber
+          ? applyCommonValuesToRow(row, nextCommonValues)
+          : row
+      )
+    )
   }
 
   return (
@@ -442,6 +486,51 @@ export default function CostingClient() {
               value={revisionDate}
               onChange={(e) => setRevisionDate(e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+            />
+          </Field>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        <h2 className="text-lg font-semibold text-slate-900">Common Values</h2>
+        <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
+          <Field label="Prelims %">
+            <NumberInput
+              value={commonValues.prelimsPercent || ''}
+              onChange={(value) => handleCommonValueChange('prelimsPercent', value)}
+              placeholder="Prelims"
+            />
+          </Field>
+          <Field label="FOH %">
+            <NumberInput
+              value={commonValues.fohPercent || ''}
+              onChange={(value) => handleCommonValueChange('fohPercent', value)}
+              placeholder="FOH"
+            />
+          </Field>
+          <Field label="Commitments %">
+            <NumberInput
+              value={commonValues.commitmentsPercent || ''}
+              onChange={(value) =>
+                handleCommonValueChange('commitmentsPercent', value)
+              }
+              placeholder="Commitments"
+            />
+          </Field>
+          <Field label="Contingencies %">
+            <NumberInput
+              value={commonValues.contingenciesPercent || ''}
+              onChange={(value) =>
+                handleCommonValueChange('contingenciesPercent', value)
+              }
+              placeholder="Contingencies"
+            />
+          </Field>
+          <Field label="Markup">
+            <NumberInput
+              value={commonValues.markup || ''}
+              onChange={(value) => handleCommonValueChange('markup', value)}
+              placeholder="Markup"
             />
           </Field>
         </div>
@@ -580,51 +669,13 @@ export default function CostingClient() {
                       }
                       placeholder="Freight"
                     />
-                    <PercentInputCell
-                      value={row.prelimsPercent || ''}
-                      onChange={(value) =>
-                        handleBoqNumberChange(row.id, 'prelimsPercent', value)
-                      }
-                      placeholder="Prelims"
-                    />
-                    <PercentInputCell
-                      value={row.fohPercent || ''}
-                      onChange={(value) =>
-                        handleBoqNumberChange(row.id, 'fohPercent', value)
-                      }
-                      placeholder="FOH"
-                    />
-                    <PercentInputCell
-                      value={row.commitmentsPercent || ''}
-                      onChange={(value) =>
-                        handleBoqNumberChange(
-                          row.id,
-                          'commitmentsPercent',
-                          value
-                        )
-                      }
-                      placeholder="Commit"
-                    />
-                    <PercentInputCell
-                      value={row.contingenciesPercent || ''}
-                      onChange={(value) =>
-                        handleBoqNumberChange(
-                          row.id,
-                          'contingenciesPercent',
-                          value
-                        )
-                      }
-                      placeholder="Conting"
-                    />
+                    <ReadOnlyPercentCell value={commonValues.prelimsPercent} />
+                    <ReadOnlyPercentCell value={commonValues.fohPercent} />
+                    <ReadOnlyPercentCell value={commonValues.commitmentsPercent} />
+                    <ReadOnlyPercentCell value={commonValues.contingenciesPercent} />
                     <CostCell value={summary?.unitCost} />
                     <CostCell value={summary?.totalCost} />
-                    <PercentInputCell
-                      value={row.markup || ''}
-                      onChange={(value) =>
-                        handleBoqNumberChange(row.id, 'markup', value)
-                      }
-                      placeholder="Markup"
-                    />
+                    <ReadOnlyPercentCell value={commonValues.markup} />
                     <CostCell value={summary?.sellingRate} />
                     <CostCell value={summary?.sellingAmount} />
                   </tr>
@@ -766,6 +817,12 @@ function PercentInputCell({
   )
 }
 
+function ReadOnlyPercentCell({ value }: { value: number }) {
+  return (
+    <td className="px-2 py-3 text-slate-700">{formatMoney(value)}</td>
+  )
+}
+
 function NumberInput({
   value,
   onChange,
@@ -892,16 +949,37 @@ function getRowSummary(
   })
 }
 
+function getCommonValuesForRows(rows: BoqItem[]): CommonValues {
+  const firstRow = rows[0]
+
+  return firstRow
+    ? {
+        prelimsPercent: Number(firstRow.prelimsPercent || 0),
+        fohPercent: Number(firstRow.fohPercent || 0),
+        commitmentsPercent: Number(firstRow.commitmentsPercent || 0),
+        contingenciesPercent: Number(firstRow.contingenciesPercent || 0),
+        markup: Number(firstRow.markup || 0),
+      }
+    : createEmptyCommonValues()
+}
+
+function applyCommonValuesToRow(row: BoqItem, commonValues: CommonValues): BoqItem {
+  return {
+    ...row,
+    prelimsPercent: commonValues.prelimsPercent,
+    fohPercent: commonValues.fohPercent,
+    commitmentsPercent: commonValues.commitmentsPercent,
+    contingenciesPercent: commonValues.contingenciesPercent,
+    markup: commonValues.markup,
+  }
+}
+
+function applyCommonValuesToRows(rows: BoqItem[], commonValues: CommonValues) {
+  return rows.map((row) => applyCommonValuesToRow(row, commonValues))
+}
+
 function isNumericBoqField(field: keyof BoqItem): field is NumericBoqField {
-  return [
-    'quantity',
-    'freightCustomDutyPercent',
-    'prelimsPercent',
-    'fohPercent',
-    'commitmentsPercent',
-    'contingenciesPercent',
-    'markup',
-  ].includes(field)
+  return ['quantity', 'freightCustomDutyPercent'].includes(field)
 }
 
 function escapeHtmlValue(value: string | number) {

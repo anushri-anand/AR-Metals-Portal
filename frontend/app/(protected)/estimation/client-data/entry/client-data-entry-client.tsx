@@ -5,6 +5,7 @@ import { createClientData } from '@/lib/estimation-storage'
 
 const initialForm = {
   clientName: '',
+  supplierTrnNo: '',
   country: '',
   city: '',
   contactPerson: '',
@@ -38,6 +39,7 @@ export default function ClientDataEntryClient() {
     try {
       await createClientData({
         clientName: form.clientName.trim(),
+        supplierTrnNo: form.supplierTrnNo.trim(),
         country: form.country.trim(),
         city: form.city.trim(),
         contactPerson: form.contactPerson.trim(),
@@ -76,6 +78,16 @@ export default function ClientDataEntryClient() {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
               placeholder="Enter client name"
               required
+            />
+          </Field>
+
+          <Field label="Supplier TRN No.">
+            <input
+              name="supplierTrnNo"
+              value={form.supplierTrnNo}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              placeholder="Enter supplier TRN number"
             />
           </Field>
 

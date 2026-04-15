@@ -26,6 +26,7 @@ class MasterListItem(models.Model):
 
 class ClientData(models.Model):
     client_name = models.CharField(max_length=255, unique=True)
+    supplier_trn_no = models.CharField(max_length=100, blank=True, default='')
     country = models.CharField(max_length=100, blank=True, default='')
     city = models.CharField(max_length=100, blank=True, default='')
     contact_person = models.CharField(max_length=255, blank=True, default='')
@@ -65,8 +66,9 @@ class TenderLog(models.Model):
     )
 
     tender_number = models.CharField(max_length=100, unique=True)
-    tender_name = models.CharField(max_length=255, blank=True, default='')
     quote_ref = models.CharField(max_length=100, blank=True, default='')
+    revision_number = models.CharField(max_length=50, blank=True, default='')
+    revision_date = models.DateField(null=True, blank=True)
     client = models.ForeignKey(
         ClientData,
         on_delete=models.SET_NULL,
@@ -76,6 +78,8 @@ class TenderLog(models.Model):
     )
     project_name = models.CharField(max_length=255, blank=True, default='')
     project_location = models.CharField(max_length=255, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    selling_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     tender_date = models.DateField(null=True, blank=True)
     submission_date = models.DateField(null=True, blank=True)
     status = models.CharField(
@@ -171,8 +175,7 @@ class EstimateCostLine(models.Model):
     wastage_percent = models.DecimalField(max_digits=8, decimal_places=2, default=0)
 
     class Meta:
-        ordering = ['costing', 'category']
-        unique_together = ('costing', 'category')
+        ordering = ['costing', 'category','id']
 
     def __str__(self):
         return f'{self.costing} - {self.category}'
@@ -230,3 +233,181 @@ class LabourCostLine(models.Model):
 
     def __str__(self):
         return f'{self.costing} - {self.category} - {self.stage} - {self.role}'
+
+
+class ContractRevenue(models.Model):
+    project_number = models.CharField(max_length=100)
+    project_name = models.CharField(max_length=255)
+    contract_value = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    start_date = models.DateField(null=True, blank=True)
+    completion_date = models.DateField(null=True, blank=True)
+    budget_material = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    budget_machining = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    budget_coating = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    budget_consumables = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    budget_subcontracts = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    budget_production_labour = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    budget_freight_custom = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    budget_installation_labour = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    budget_prelims = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    budget_foh = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    budget_commitments = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    budget_contingencies = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['project_number', '-created_at']
+
+    def __str__(self):
+        return f'{self.project_number} - {self.project_name}'
+
+
+class ContractRevenueVariation(models.Model):
+    revenue = models.ForeignKey(
+        ContractRevenue,
+        on_delete=models.CASCADE,
+        related_name='variations',
+    )
+    variation_number = models.CharField(max_length=100)
+    amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return f'{self.revenue.project_number} - {self.variation_number}'
+
+
+class ContractVariationLog(models.Model):
+    STATUS_AGREED = 'Agreed'
+    STATUS_SUBMITTED = 'Submitted'
+    STATUS_TO_BE_SUBMITTED = 'To be Submitted'
+    STATUS_REJECTED = 'Rejected'
+    STATUS_DISPUTED = 'Disputed'
+    STATUS_CANCELLED = 'Cancelled'
+
+    STATUS_CHOICES = (
+        (STATUS_AGREED, STATUS_AGREED),
+        (STATUS_SUBMITTED, STATUS_SUBMITTED),
+        (STATUS_TO_BE_SUBMITTED, STATUS_TO_BE_SUBMITTED),
+        (STATUS_REJECTED, STATUS_REJECTED),
+        (STATUS_DISPUTED, STATUS_DISPUTED),
+        (STATUS_CANCELLED, STATUS_CANCELLED),
+    )
+
+    project_number = models.CharField(max_length=100)
+    project_name = models.CharField(max_length=255)
+    rfv_number = models.CharField(max_length=100, blank=True, default='')
+    client_variation_number = models.CharField(max_length=100, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    document_ref = models.CharField(max_length=100, blank=True, default='')
+    submitted_amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    arm_letter_ref = models.CharField(max_length=100, blank=True, default='')
+    submitted_date = models.DateField(null=True, blank=True)
+    approved_amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    client_letter_ref = models.CharField(max_length=100, blank=True, default='')
+    approved_date = models.DateField(null=True, blank=True)
+    status = models.CharField(
+        max_length=30,
+        choices=STATUS_CHOICES,
+        default=STATUS_TO_BE_SUBMITTED,
+    )
+    remarks = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['project_number', 'client_variation_number', 'id']
+
+    def __str__(self):
+        return f'{self.project_number} - {self.client_variation_number or self.id}'
+
+
+class ContractPaymentLog(models.Model):
+    project_number = models.CharField(max_length=100)
+    project_name = models.CharField(max_length=255)
+    sn = models.PositiveIntegerField(default=1)
+    submitted_date = models.DateField(null=True, blank=True)
+    approved_date = models.DateField(null=True, blank=True)
+    submitted_advance = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    submitted_recovery_advance = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    gross_submitted_amount = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    submitted_retention = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    submitted_release_retention = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    net_submitted_amount = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    submitted_vat = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    net_submitted_inc_vat = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    approved_advance = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    approved_recovery_advance = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    gross_approved_amount = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    approved_retention = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    approved_release_retention = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    net_approved_amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    approved_vat = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    net_approved_inc_vat = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    due_date = models.DateField(null=True, blank=True)
+    paid_date = models.DateField(null=True, blank=True)
+    forecast_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['project_number', 'sn', 'id']
+
+    def __str__(self):
+        return f'{self.project_number} - Payment {self.sn}'

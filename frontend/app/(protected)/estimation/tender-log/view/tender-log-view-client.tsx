@@ -141,7 +141,7 @@ export default function TenderLogViewClient() {
                 <th className="px-4 py-3 font-semibold">Project Name</th>
                 <th className="px-4 py-3 font-semibold">Project Location</th>
                 <th className="px-4 py-3 font-semibold">Description</th>
-                <th className="px-4 py-3 font-semibold">Selling Amount</th>
+                <th className="px-4 py-3 font-semibold">Quote Amount</th>
                 <th className="px-4 py-3 font-semibold">Tender Submission Date</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Remarks</th>

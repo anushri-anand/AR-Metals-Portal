@@ -90,8 +90,10 @@ class PaymentEntry(models.Model):
     )
 
     advance = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    recovery_advance = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     delivery = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     retention = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    release_retention = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -101,6 +103,45 @@ class PaymentEntry(models.Model):
 
     def __str__(self):
         return f'Payment - {self.purchase_order.po_number}'
+
+    @property
+    def net_payable_amount(self):
+        return (
+            self.advance
+            - self.recovery_advance
+            + self.delivery
+            - self.retention
+            + self.release_retention
+        )
+
+
+class PaymentDeliveryItem(models.Model):
+    payment_entry = models.ForeignKey(
+        PaymentEntry,
+        on_delete=models.CASCADE,
+        related_name='delivery_items',
+    )
+
+    line_number = models.PositiveIntegerField()
+    item_description = models.TextField(blank=True, default='')
+    quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    unit = models.CharField(max_length=50, blank=True, default='')
+    rate = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    received_quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['payment_entry', 'line_number']
+        unique_together = ('payment_entry', 'line_number')
+
+    def __str__(self):
+        return f'{self.payment_entry.purchase_order.po_number} - Item {self.line_number}'
+
+    @property
+    def actual_incurred_cost(self):
+        return self.received_quantity * self.rate
 
 
 class PaymentPhase(models.Model):
@@ -116,6 +157,9 @@ class PaymentPhase(models.Model):
     due_date = models.DateField()
     forecast_date = models.DateField()
     paid = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    vat = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    invoice_no = models.CharField(max_length=100, blank=True, default='')
+    invoice_date = models.DateField(null=True, blank=True)
     paid_date = models.DateField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -132,3 +176,7 @@ class PaymentPhase(models.Model):
 
     def __str__(self):
         return f'{self.payment_entry.purchase_order.po_number} - Phase {self.phase_number}'
+
+    @property
+    def paid_exc_vat(self):
+        return self.paid - self.vat

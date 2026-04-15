@@ -44,6 +44,26 @@ export const navigation: NavigationSection[] = [
     ],
   },
   {
+    title: 'Contract',
+    items: [
+      {
+        label: 'Revenue',
+        href: '/estimation/contract/revenue',
+        roles: ['user_1', 'admin'],
+      },
+      {
+        label: 'Variation Log',
+        href: '/estimation/contract/variation-log',
+        roles: ['user_1', 'admin'],
+      },
+      {
+        label: 'Payment Log',
+        href: '/estimation/contract/payment-log',
+        roles: ['user_1', 'admin'],
+      },
+    ],
+  },
+  {
     title: 'Employee',
     items: [
       {

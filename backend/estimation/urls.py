@@ -7,6 +7,10 @@ from .views import (
     BoqItemListAPIView,
     ClientDataAPIView,
     ClientDataDetailAPIView,
+    ContractPaymentLogAPIView,
+    ContractRevenueAPIView,
+    ContractRevenueDetailAPIView,
+    ContractVariationLogAPIView,
     MasterListAPIView,
     MasterListDetailAPIView,
     TenderLogAPIView,
@@ -33,6 +37,26 @@ urlpatterns = [
         'master-list/<int:pk>/',
         MasterListDetailAPIView.as_view(),
         name='estimation-master-list-detail',
+    ),
+    path(
+        'contract/revenue/',
+        ContractRevenueAPIView.as_view(),
+        name='estimation-contract-revenue',
+    ),
+    path(
+        'contract/revenue/<int:pk>/',
+        ContractRevenueDetailAPIView.as_view(),
+        name='estimation-contract-revenue-detail',
+    ),
+    path(
+        'contract/variation-log/',
+        ContractVariationLogAPIView.as_view(),
+        name='estimation-contract-variation-log',
+    ),
+    path(
+        'contract/payment-log/',
+        ContractPaymentLogAPIView.as_view(),
+        name='estimation-contract-payment-log',
     ),
     path('boq-items/', BoqItemListAPIView.as_view(), name='estimation-boq-items'),
     path(
