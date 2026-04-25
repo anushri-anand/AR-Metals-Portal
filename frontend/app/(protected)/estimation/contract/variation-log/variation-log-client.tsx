@@ -128,7 +128,6 @@ export default function ContractVariationLogClient() {
           Track client variations and summarize submitted/approved values by
           status.
         </p>
-        {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       </div>
 
@@ -266,13 +265,16 @@ export default function ContractVariationLogClient() {
           />
         </Field>
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {saving ? 'Saving...' : 'Save Variation'}
-        </button>
+        <div className="space-y-3">
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? 'Saving...' : 'Save Variation'}
+          </button>
+          {message && <p className="text-sm text-green-700">{message}</p>}
+        </div>
       </form>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

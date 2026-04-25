@@ -81,13 +81,13 @@ export default function ClientDataEntryClient() {
             />
           </Field>
 
-          <Field label="Supplier TRN No.">
+          <Field label="Client TRN No.">
             <input
               name="supplierTrnNo"
               value={form.supplierTrnNo}
               onChange={handleChange}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-              placeholder="Enter supplier TRN number"
+              placeholder="Enter client TRN number"
             />
           </Field>
 

@@ -530,5 +530,8 @@ function Field({
 }
 
 function formatMoney(value: number) {
-  return value.toFixed(2)
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 }

@@ -5,6 +5,7 @@ import { fetchAPI } from '@/lib/api'
 
 type ProjectItem = {
   id: number
+  package: string
   item_name: string
   quantity: string
   unit: string
@@ -15,6 +16,7 @@ type ProjectDetail = {
   id: number
   project_name: string
   project_number: string
+  contract_po_ref?: string
   items: ProjectItem[]
 }
 
@@ -131,10 +133,14 @@ export default function ProjectDetailsViewClient() {
                 <h3 className="mb-3 text-lg font-semibold text-slate-900">
                   {project.project_number} - {project.project_name}
                 </h3>
+                <p className="mb-3 text-sm text-slate-700">
+                  Contract / PO Ref: {project.contract_po_ref || '-'}
+                </p>
 
-                <table className="min-w-[720px] border-collapse">
+                <table className="min-w-[860px] border-collapse">
                   <thead className="sticky top-0 z-10 bg-white">
                     <tr className="border-b border-slate-300 text-left text-slate-900">
+                      <th className="py-3 pr-4 font-semibold">Package</th>
                       <th className="py-3 pr-4 font-semibold">Item</th>
                       <th className="py-3 pr-4 font-semibold">Qty</th>
                       <th className="py-3 pr-4 font-semibold">Unit</th>
@@ -145,6 +151,9 @@ export default function ProjectDetailsViewClient() {
                   <tbody>
                     {project.items.map((item) => (
                       <tr key={item.id} className="border-b border-slate-100">
+                        <td className="py-3 pr-4 text-slate-800">
+                          {item.package || '-'}
+                        </td>
                         <td className="py-3 pr-4 text-slate-800">{item.item_name}</td>
                         <td className="py-3 pr-4 text-slate-800">{item.quantity}</td>
                         <td className="py-3 pr-4 text-slate-800">{item.unit}</td>

@@ -1,7 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import {
+  COMPANY_CHANGE_EVENT,
+  getStoredCompany,
+  type CompanyName,
+} from '@/lib/company'
+import { findNextDocumentNumber } from '@/lib/document-numbering'
 
 type FormState = {
   employeeId: string
@@ -35,8 +41,46 @@ const initialForm: FormState = {
 
 export default function PersonalDetailsEntryForm() {
   const [form, setForm] = useState<FormState>(initialForm)
+  const [employeeIds, setEmployeeIds] = useState<string[]>([])
+  const [selectedCompany, setSelectedCompany] = useState<CompanyName>(
+    getStoredCompany() || 'ARM'
+  )
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    async function loadEmployees() {
+      try {
+        const data = await fetchAPI('/employees/options/')
+        setEmployeeIds(
+          Array.isArray(data)
+            ? data.map((employee) => String(employee?.employee_id || ''))
+            : []
+        )
+      } catch {
+        setEmployeeIds([])
+      }
+    }
+
+    void loadEmployees()
+  }, [])
+
+  useEffect(() => {
+    function handleCompanyChange() {
+      setSelectedCompany(getStoredCompany() || 'ARM')
+    }
+
+    window.addEventListener(COMPANY_CHANGE_EVENT, handleCompanyChange)
+    return () => window.removeEventListener(COMPANY_CHANGE_EVENT, handleCompanyChange)
+  }, [])
+
+  const nextEmployeeId = useMemo(
+    () =>
+      findNextDocumentNumber(employeeIds, 'ID', {
+        company: selectedCompany,
+      }),
+    [employeeIds, selectedCompany]
+  )
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -55,10 +99,12 @@ export default function PersonalDetailsEntryForm() {
     setError('')
 
     try {
+      const employeeId = (form.employeeId || nextEmployeeId).trim()
+
       await fetchAPI('/employees/personal-details/entry/', {
         method: 'POST',
         body: JSON.stringify({
-          employee_id: form.employeeId,
+          employee_id: employeeId,
           employee_name: form.employeeName,
           designation: form.designation,
           category: form.category,
@@ -73,7 +119,10 @@ export default function PersonalDetailsEntryForm() {
         }),
       })
 
-      setForm(initialForm)
+      setEmployeeIds((prev) => [...prev, employeeId])
+      setForm({
+        ...initialForm,
+      })
       setMessage('Employee personal details saved successfully.')
     } catch (err) {
       setError(
@@ -101,10 +150,10 @@ export default function PersonalDetailsEntryForm() {
           <Field label="Employee ID">
             <input
               name="employeeId"
-              value={form.employeeId}
+              value={form.employeeId || nextEmployeeId}
               onChange={handleChange}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-              placeholder="Enter employee ID"
+              placeholder={`${selectedCompany}-ID-001`}
               required
             />
           </Field>

@@ -4,7 +4,9 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
 import {
+  approveCostingRevisionSnapshot,
   BoqItem,
+  CostingRevisionSnapshot,
   MasterListItem,
   TenderCosting,
   TenderLog,
@@ -12,23 +14,34 @@ import {
   createId,
   formatMoney,
   getBoqItems,
+  getCostingRevisionSnapshots,
   getMasterListItems,
   getTenderCostings,
   getTenderLogs,
   saveBoqItems,
+  saveTenderCosting,
+  submitCostingRevisionSnapshot,
   updateBoqItem,
 } from '@/lib/estimation-storage'
 
 const frozenColumns = [
   { key: 'sn', width: 40, left: 0 },
   { key: 'clientsBoq', width: 96, left: 40 },
-  { key: 'description', width: 260, left: 136 },
-  { key: 'quantity', width: 70, left: 396 },
-  { key: 'unit', width: 56, left: 466 },
-  { key: 'details', width: 84, left: 522 },
+  { key: 'package', width: 110, left: 136 },
+  { key: 'description', width: 260, left: 246 },
+  { key: 'quantity', width: 70, left: 506 },
+  { key: 'unit', width: 56, left: 576 },
+  { key: 'details', width: 84, left: 632 },
 ] as const
 
 const costColumnWidths = [
+  110,
+  145,
+  115,
+  105,
+  120,
+  120,
+  145,
   120,
   120,
   140,
@@ -36,9 +49,6 @@ const costColumnWidths = [
   120,
   100,
   90,
-  130,
-  135,
-  100,
   110,
   100,
   115,
@@ -69,6 +79,7 @@ function createEmptyRow(sn = '1'): BoqItem {
     revisionNumber: '',
     revisionDate: null,
     clientsBoq: '',
+    package: '',
     description: '',
     quantity: 0,
     unit: '',
@@ -97,6 +108,7 @@ export default function CostingClient() {
   const [masterItems, setMasterItems] = useState<MasterListItem[]>([])
   const [costings, setCostings] = useState<TenderCosting[]>([])
   const [tenderLogs, setTenderLogs] = useState<TenderLog[]>([])
+  const [snapshots, setSnapshots] = useState<CostingRevisionSnapshot[]>([])
   const [selectedTenderNumber, setSelectedTenderNumber] = useState('')
   const [revisionNumber, setRevisionNumber] = useState('')
   const [revisionDate, setRevisionDate] = useState('')
@@ -106,6 +118,11 @@ export default function CostingClient() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
+  const [role, setRole] = useState('')
+  const [submittingSnapshot, setSubmittingSnapshot] = useState(false)
+  const [approvingSnapshotId, setApprovingSnapshotId] = useState<number | null>(
+    null
+  )
 
   useEffect(() => {
     async function loadData() {
@@ -115,16 +132,21 @@ export default function CostingClient() {
           savedMasterItems,
           savedCostings,
           savedTenderLogs,
+          savedSnapshots,
+          me,
         ] = await Promise.all([
           getBoqItems(),
           getMasterListItems(),
           getTenderCostings(),
           getTenderLogs(),
+          getCostingRevisionSnapshots(),
+          fetchAPI('/accounts/me/'),
         ])
         const tenderNumbers = getTenderNumbers(savedBoqItems, savedTenderLogs)
         const firstTenderNumber = tenderNumbers[0] || ''
-        const firstRevisionNumber = getFirstRevision(
+        const firstRevisionNumber = getDefaultRevisionNumber(
           savedBoqItems,
+          savedSnapshots,
           firstTenderNumber
         )
         const firstRevisionDate = getRevisionDate(
@@ -133,7 +155,7 @@ export default function CostingClient() {
           firstRevisionNumber
         )
         const firstRows = firstTenderNumber
-          ? getRowsForTenderRevision(
+          ? getRowsForRevisionSelection(
               savedBoqItems,
               firstTenderNumber,
               firstRevisionNumber
@@ -145,11 +167,13 @@ export default function CostingClient() {
         setMasterItems(savedMasterItems)
         setCostings(savedCostings)
         setTenderLogs(savedTenderLogs)
+        setSnapshots(savedSnapshots)
         setSelectedTenderNumber(firstTenderNumber)
         setRevisionNumber(firstRevisionNumber)
         setRevisionDate(firstRevisionDate)
         setCommonValues(firstCommonValues)
         setRows(applyCommonValuesToRows(firstRows, firstCommonValues))
+        setRole(typeof me?.role === 'string' ? me.role : '')
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'Failed to load costing data.'
@@ -161,12 +185,23 @@ export default function CostingClient() {
   }, [])
 
   const tenderNumbers = getTenderNumbers(allRows, tenderLogs)
+  const tableTotals = getTableTotals(rows, costings, masterItems)
+  const matchingSnapshot =
+    snapshots.find(
+      (snapshot) =>
+        snapshot.tenderNumber === selectedTenderNumber &&
+        snapshot.revisionNumber === revisionNumber.trim()
+    ) || null
 
   function handleTenderChange(value: string) {
-    const nextRevisionNumber = getFirstRevision(allRows, value)
+    const nextRevisionNumber = getDefaultRevisionNumber(
+      allRows,
+      snapshots,
+      value
+    )
     const nextRevisionDate = getRevisionDate(allRows, value, nextRevisionNumber)
     const nextRows = value
-      ? getRowsForTenderRevision(allRows, value, nextRevisionNumber)
+      ? getRowsForRevisionSelection(allRows, value, nextRevisionNumber)
       : [createEmptyRow()]
     const nextCommonValues = getCommonValuesForRows(nextRows)
 
@@ -180,16 +215,54 @@ export default function CostingClient() {
   }
 
   function handleRevisionChange(value: string) {
-    const nextRows = selectedTenderNumber
-      ? getRowsForTenderRevision(allRows, selectedTenderNumber, value)
-      : [createEmptyRow()]
-    const nextCommonValues = getCommonValuesForRows(nextRows)
+    const normalizedRevision = value.trim()
+    const existingRows = selectedTenderNumber
+      ? getRowsForTenderRevision(allRows, selectedTenderNumber, normalizedRevision)
+      : []
+    const hasExistingRows = existingRows.some(isSavedBoqRow)
+    const previousRevisionRows =
+      !hasExistingRows && selectedTenderNumber
+        ? getPreviousRevisionRows(
+            allRows,
+            selectedTenderNumber,
+            normalizedRevision
+          )
+        : []
+    const nextRows =
+      selectedTenderNumber && hasExistingRows
+        ? existingRows
+        : previousRevisionRows.length > 0
+          ? cloneRowsForRevision(
+              previousRevisionRows,
+              selectedTenderNumber,
+              normalizedRevision
+            )
+          : [
+              {
+                ...createEmptyRow(),
+                tenderNumber: selectedTenderNumber,
+                revisionNumber: normalizedRevision,
+                revisionDate: null,
+              },
+            ]
+    const nextCommonValues =
+      previousRevisionRows.length > 0 && !hasExistingRows
+        ? getCommonValuesForRows(previousRevisionRows)
+        : getCommonValuesForRows(nextRows)
 
     setRevisionNumber(value)
-    setRevisionDate(getRevisionDate(allRows, selectedTenderNumber, value))
+    setRevisionDate(
+      hasExistingRows
+        ? getRevisionDate(allRows, selectedTenderNumber, normalizedRevision)
+        : ''
+    )
     setRows(applyCommonValuesToRows(nextRows, nextCommonValues))
     setCommonValues(nextCommonValues)
-    setMessage('')
+    setMessage(
+      previousRevisionRows.length > 0 && !hasExistingRows
+        ? `Loaded ${getRevisionLabel(previousRevisionRows[0]?.revisionNumber)} as the starting point for ${getRevisionLabel(normalizedRevision)}.`
+        : ''
+    )
     setError('')
   }
 
@@ -234,7 +307,10 @@ export default function CostingClient() {
     }
 
     const rowsToSave = rows
-      .filter((row) => row.clientsBoq || row.description || row.quantity || row.unit)
+      .filter(
+        (row) =>
+          row.clientsBoq || row.package || row.description || row.quantity || row.unit
+      )
       .map((row, index) => ({
         ...applyCommonValuesToRow(row, commonValues),
         sn: String(index + 1),
@@ -242,6 +318,19 @@ export default function CostingClient() {
         revisionNumber: revisionNumber.trim(),
         revisionDate: revisionDate || null,
       }))
+    const currentRevisionRows = allRows.filter(
+      (row) =>
+        row.tenderNumber === selectedTenderNumber &&
+        row.revisionNumber === revisionNumber.trim()
+    )
+    const previousRevisionRows =
+      currentRevisionRows.length === 0
+        ? getPreviousRevisionRows(
+            allRows,
+            selectedTenderNumber,
+            revisionNumber.trim()
+          )
+        : []
     const rowsFromOtherTenderRevisions = allRows.filter(
       (row) =>
         row.tenderNumber !== selectedTenderNumber ||
@@ -258,14 +347,119 @@ export default function CostingClient() {
         selectedTenderNumber,
         revisionNumber.trim()
       )
+      let nextCostings = costings
+
+      if (previousRevisionRows.length > 0) {
+        const copiedCostings = await copyRevisionCostings({
+          sourceRows: previousRevisionRows,
+          targetRows: savedCurrentRows,
+          currentCostings: costings,
+        })
+
+        if (copiedCostings.length > 0) {
+          nextCostings = await getTenderCostings()
+        }
+      }
 
       setAllRows(savedRows)
+      setCostings(nextCostings)
       setRows(applyCommonValuesToRows(savedCurrentRows, commonValues))
       setRevisionNumber(revisionNumber.trim())
       setCommonValues(getCommonValuesForRows(savedCurrentRows))
       setMessage('Bill of Quantity saved.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save BOQ.')
+    }
+  }
+
+  async function handleSubmitRevision() {
+    if (!selectedTenderNumber) {
+      setError('Select a tender number before submitting.')
+      return
+    }
+
+    const hasSavedCurrentRows = allRows.some(
+      (row) =>
+        row.tenderNumber === selectedTenderNumber &&
+        row.revisionNumber === revisionNumber.trim()
+    )
+
+    if (!hasSavedCurrentRows) {
+      setError('Save BOQ for this revision before submitting it.')
+      return
+    }
+
+    setSubmittingSnapshot(true)
+    setError('')
+    setMessage('')
+
+    try {
+      const savedSnapshot = await submitCostingRevisionSnapshot({
+        tenderNumber: selectedTenderNumber,
+        projectName: getTenderProjectName(tenderLogs, selectedTenderNumber),
+        revisionNumber: revisionNumber.trim(),
+      })
+
+      setSnapshots((prev) => upsertCostingSnapshot(prev, savedSnapshot))
+      setMessage(
+        `Costing ${getRevisionLabel(revisionNumber.trim())} submitted for approval.`
+      )
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to submit costing revision.'
+      )
+    } finally {
+      setSubmittingSnapshot(false)
+    }
+  }
+
+  async function handleApproveRevision(snapshotId: number) {
+    setApprovingSnapshotId(snapshotId)
+    setError('')
+    setMessage('')
+
+    try {
+      const approvedSnapshot = await approveCostingRevisionSnapshot(snapshotId)
+      const nextSnapshots = upsertCostingSnapshot(snapshots, approvedSnapshot)
+
+      setSnapshots(nextSnapshots)
+      if (
+        approvedSnapshot.tenderNumber === selectedTenderNumber &&
+        approvedSnapshot.revisionNumber === revisionNumber.trim()
+      ) {
+        const nextRevisionNumber = getDefaultRevisionNumber(
+          allRows,
+          nextSnapshots,
+          selectedTenderNumber
+        )
+        const nextRevisionDate = getRevisionDate(
+          allRows,
+          selectedTenderNumber,
+          nextRevisionNumber
+        )
+        const nextRows = selectedTenderNumber
+          ? getRowsForRevisionSelection(
+              allRows,
+              selectedTenderNumber,
+              nextRevisionNumber
+            )
+          : [createEmptyRow()]
+        const nextCommonValues = getCommonValuesForRows(nextRows)
+
+        setRevisionNumber(nextRevisionNumber)
+        setRevisionDate(nextRevisionDate)
+        setRows(applyCommonValuesToRows(nextRows, nextCommonValues))
+        setCommonValues(nextCommonValues)
+      }
+      setMessage(
+        `Costing ${getRevisionLabel(approvedSnapshot.revisionNumber)} approved.`
+      )
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to approve costing revision.'
+      )
+    } finally {
+      setApprovingSnapshotId(null)
     }
   }
 
@@ -301,6 +495,7 @@ export default function CostingClient() {
           revisionNumber: revisionNumber.trim(),
           revisionDate: revisionDate || null,
           clientsBoq: row.clientsBoq || '',
+          package: row.package || '',
           description: row.description || '',
           quantity: Number(row.quantity || 0),
           freightCustomDutyPercent: Number(row.freightCustomDutyPercent || 0),
@@ -331,6 +526,7 @@ export default function CostingClient() {
       [
         'SN',
         "Client's BOQ",
+        'Package',
         'Item Description',
         'Qty',
         'Unit',
@@ -338,13 +534,17 @@ export default function CostingClient() {
         'Selling Amount',
       ],
       ...rows
-        .filter((row) => row.clientsBoq || row.description || row.quantity || row.unit)
+        .filter(
+          (row) =>
+            row.clientsBoq || row.package || row.description || row.quantity || row.unit
+        )
         .map((row, index) => {
           const summary = getRowSummary(row, costings, masterItems)
 
           return [
             row.sn || String(index + 1),
             row.clientsBoq,
+            row.package,
             row.description,
             row.quantity,
             row.unit,
@@ -451,11 +651,10 @@ export default function CostingClient() {
           Quantity, then open each row to enter costing details.
         </p>
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
-        {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
           <Field label="Tender Number">
             <select
               value={selectedTenderNumber}
@@ -488,6 +687,51 @@ export default function CostingClient() {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
             />
           </Field>
+
+          <Field label="Actions">
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={handleSubmitRevision}
+                disabled={submittingSnapshot || !selectedTenderNumber}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                {submittingSnapshot ? 'Submitting...' : 'Submit'}
+              </button>
+              {role === 'admin' &&
+              matchingSnapshot &&
+              matchingSnapshot.status !== 'approved' ? (
+                <button
+                  type="button"
+                  onClick={() => handleApproveRevision(matchingSnapshot.id)}
+                  disabled={approvingSnapshotId === matchingSnapshot.id}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  {approvingSnapshotId === matchingSnapshot.id
+                    ? 'Approving...'
+                    : 'Approve'}
+                </button>
+              ) : null}
+            </div>
+            {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
+          </Field>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-700">
+          <span className="font-medium">Current status:</span>
+          <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold uppercase tracking-wide text-slate-700">
+            {matchingSnapshot?.status || 'draft'}
+          </span>
+          {matchingSnapshot?.submittedBy ? (
+            <span>
+              Submitted by {matchingSnapshot.submittedBy}
+            </span>
+          ) : null}
+          {matchingSnapshot?.approvedBy ? (
+            <span>
+              Approved by {matchingSnapshot.approvedBy}
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -563,13 +807,27 @@ export default function CostingClient() {
                   Client&apos;s BOQ
                 </StickyHeader>
                 <StickyHeader column={frozenColumns[2]}>
+                  Package
+                </StickyHeader>
+                <StickyHeader column={frozenColumns[3]}>
                   Item Description
                 </StickyHeader>
-                <StickyHeader column={frozenColumns[3]}>Qty</StickyHeader>
-                <StickyHeader column={frozenColumns[4]}>Unit</StickyHeader>
-                <StickyHeader column={frozenColumns[5]} isLastFrozen>
+                <StickyHeader column={frozenColumns[4]}>Qty</StickyHeader>
+                <StickyHeader column={frozenColumns[5]}>Unit</StickyHeader>
+                <StickyHeader column={frozenColumns[6]} isLastFrozen>
                   Details
                 </StickyHeader>
+                <th className="px-4 py-3 font-semibold">Material</th>
+                <th className="px-4 py-3 font-semibold">
+                  Production Labour
+                </th>
+                <th className="px-4 py-3 font-semibold">Machining</th>
+                <th className="px-4 py-3 font-semibold">Coating</th>
+                <th className="px-4 py-3 font-semibold">Consumable</th>
+                <th className="px-4 py-3 font-semibold">Subcontract</th>
+                <th className="px-4 py-3 font-semibold">
+                  Installation Labour
+                </th>
                 <th className="px-4 py-3 font-semibold">Supply Unit Cost</th>
                 <th className="px-4 py-3 font-semibold">Supply Total Cost</th>
                 <th className="px-4 py-3 font-semibold">
@@ -582,9 +840,6 @@ export default function CostingClient() {
                   Freight &amp; Custom/Duty %
                 </th>
                 <th className="px-4 py-3 font-semibold">Prelims %</th>
-                <th className="px-4 py-3 font-semibold">FOH %</th>
-                <th className="px-4 py-3 font-semibold">Commitments %</th>
-                <th className="px-4 py-3 font-semibold">Contingencies %</th>
                 <th className="px-4 py-3 font-semibold">Unit Cost</th>
                 <th className="px-4 py-3 font-semibold">Total Cost</th>
                 <th className="px-4 py-3 font-semibold">Markup</th>
@@ -612,6 +867,15 @@ export default function CostingClient() {
                     </StickyCell>
                     <StickyCell column={frozenColumns[2]}>
                       <CompactInput
+                        value={row.package}
+                        onChange={(value) =>
+                          handleRowChange(row.id, 'package', value)
+                        }
+                        placeholder="Package"
+                      />
+                    </StickyCell>
+                    <StickyCell column={frozenColumns[3]}>
+                      <CompactInput
                         value={row.description}
                         onChange={(value) =>
                           handleRowChange(row.id, 'description', value)
@@ -619,7 +883,7 @@ export default function CostingClient() {
                         placeholder="Item description"
                       />
                     </StickyCell>
-                    <StickyCell column={frozenColumns[3]}>
+                    <StickyCell column={frozenColumns[4]}>
                       <CompactInput
                         type="number"
                         value={row.quantity || ''}
@@ -629,14 +893,14 @@ export default function CostingClient() {
                         placeholder="Qty"
                       />
                     </StickyCell>
-                    <StickyCell column={frozenColumns[4]}>
+                    <StickyCell column={frozenColumns[5]}>
                       <CompactInput
                         value={row.unit}
                         onChange={(value) => handleRowChange(row.id, 'unit', value)}
                         placeholder="Unit"
                       />
                     </StickyCell>
-                    <StickyCell column={frozenColumns[5]} isLastFrozen>
+                    <StickyCell column={frozenColumns[6]} isLastFrozen>
                       {isSavedBoqRow(row) ? (
                         <Link
                           href={`/estimation/costing/${encodeURIComponent(
@@ -654,6 +918,13 @@ export default function CostingClient() {
                         </span>
                       )}
                     </StickyCell>
+                    <CostCell value={summary?.materialUnitCost} />
+                    <CostCell value={summary?.productionLabourUnitCost} />
+                    <CostCell value={summary?.machiningUnitCost} />
+                    <CostCell value={summary?.coatingUnitCost} />
+                    <CostCell value={summary?.consumableUnitCost} />
+                    <CostCell value={summary?.subcontractUnitCost} />
+                    <CostCell value={summary?.installationLabourUnitCost} />
                     <CostCell value={summary?.supplyUnitCost} />
                     <CostCell value={summary?.supplyTotalCost} />
                     <CostCell value={summary?.installationUnitCost} />
@@ -670,9 +941,6 @@ export default function CostingClient() {
                       placeholder="Freight"
                     />
                     <ReadOnlyPercentCell value={commonValues.prelimsPercent} />
-                    <ReadOnlyPercentCell value={commonValues.fohPercent} />
-                    <ReadOnlyPercentCell value={commonValues.commitmentsPercent} />
-                    <ReadOnlyPercentCell value={commonValues.contingenciesPercent} />
                     <CostCell value={summary?.unitCost} />
                     <CostCell value={summary?.totalCost} />
                     <ReadOnlyPercentCell value={commonValues.markup} />
@@ -682,6 +950,37 @@ export default function CostingClient() {
                 )
               })}
             </tbody>
+            <tfoot className="sticky bottom-0 z-40 bg-slate-100 font-semibold text-slate-900">
+              <tr>
+                <StickyFooterCell column={frozenColumns[0]} />
+                <StickyFooterCell column={frozenColumns[1]} />
+                <StickyFooterCell column={frozenColumns[2]} />
+                <StickyFooterCell column={frozenColumns[3]} />
+                <StickyFooterCell column={frozenColumns[4]} />
+                <StickyFooterCell column={frozenColumns[5]} />
+                <StickyFooterCell column={frozenColumns[6]} isLastFrozen>
+                  Total
+                </StickyFooterCell>
+                <BlankTotalCell />
+                <BlankTotalCell />
+                <BlankTotalCell />
+                <BlankTotalCell />
+                <BlankTotalCell />
+                <BlankTotalCell />
+                <BlankTotalCell />
+                <BlankTotalCell />
+                <TotalCell value={tableTotals.supplyTotalCost} />
+                <BlankTotalCell />
+                <TotalCell value={tableTotals.installationTotalCost} />
+                <BlankTotalCell />
+                <BlankTotalCell />
+                <BlankTotalCell />
+                <TotalCell value={tableTotals.totalCost} />
+                <BlankTotalCell />
+                <TotalCell value={tableTotals.sellingRate} />
+                <TotalCell value={tableTotals.sellingAmount} />
+              </tr>
+            </tfoot>
           </table>
         </div>
 
@@ -793,12 +1092,50 @@ function StickyCell({
   )
 }
 
+function StickyFooterCell({
+  column,
+  isLastFrozen = false,
+  children,
+}: {
+  column: (typeof frozenColumns)[number]
+  isLastFrozen?: boolean
+  children?: React.ReactNode
+}) {
+  return (
+    <td
+      className={`sticky z-50 border-r border-t border-slate-300 bg-slate-100 px-2 py-3 font-semibold text-slate-900 ${
+        isLastFrozen ? 'shadow-[8px_0_14px_-12px_rgba(15,23,42,0.9)]' : ''
+      }`}
+      style={{
+        left: column.left,
+        width: column.width,
+        minWidth: column.width,
+        maxWidth: column.width,
+      }}
+    >
+      {children}
+    </td>
+  )
+}
+
 function CostCell({ value }: { value?: number }) {
   return (
     <td className="whitespace-nowrap px-2 py-3 text-slate-700">
       {value === undefined ? '' : formatMoney(value)}
     </td>
   )
+}
+
+function TotalCell({ value }: { value: number }) {
+  return (
+    <td className="whitespace-nowrap border-t border-slate-300 px-2 py-3">
+      {formatMoney(value)}
+    </td>
+  )
+}
+
+function BlankTotalCell() {
+  return <td className="border-t border-slate-300 px-2 py-3" />
 }
 
 function PercentInputCell({
@@ -876,10 +1213,75 @@ function getTenderNumbers(items: BoqItem[], tenderLogs: TenderLog[]) {
   )
 }
 
-function getFirstRevision(items: BoqItem[], tenderNumber: string) {
-  return (
-    items.find((item) => item.tenderNumber === tenderNumber)?.revisionNumber || ''
+function getLatestRevision(items: BoqItem[], tenderNumber: string) {
+  return getRevisionNumbersForTender(items, tenderNumber).at(-1) || ''
+}
+
+function getDefaultRevisionNumber(
+  items: BoqItem[],
+  snapshots: CostingRevisionSnapshot[],
+  tenderNumber: string
+) {
+  const latestExistingRevision = getLatestRevision(items, tenderNumber)
+  const latestApprovedRevision = snapshots
+    .filter(
+      (snapshot) =>
+        snapshot.tenderNumber === tenderNumber && snapshot.status === 'approved'
+    )
+    .map((snapshot) => snapshot.revisionNumber)
+    .sort(compareRevisionNumbers)
+    .at(-1)
+
+  if (!latestExistingRevision && !latestApprovedRevision) {
+    return 'R0'
+  }
+
+  if (!latestApprovedRevision) {
+    return latestExistingRevision || 'R0'
+  }
+
+  const nextApprovedRevision = incrementRevisionNumber(latestApprovedRevision)
+
+  if (
+    latestExistingRevision &&
+    compareRevisionNumbers(latestExistingRevision, nextApprovedRevision) >= 0
+  ) {
+    return latestExistingRevision
+  }
+
+  return nextApprovedRevision
+}
+
+function incrementRevisionNumber(revisionNumber: string) {
+  const matches = String(revisionNumber || '').match(/\d+/g)
+  const nextNumber = matches ? Number(matches.at(-1)) + 1 : 0
+
+  return `R${nextNumber}`
+}
+
+function getRowsForRevisionSelection(
+  items: BoqItem[],
+  tenderNumber: string,
+  revisionNumber: string
+) {
+  const existingRows = getRowsForTenderRevision(items, tenderNumber, revisionNumber)
+  const hasExistingRows = existingRows.some(isSavedBoqRow)
+
+  if (hasExistingRows) {
+    return existingRows
+  }
+
+  const previousRevisionRows = getPreviousRevisionRows(
+    items,
+    tenderNumber,
+    revisionNumber
   )
+
+  if (previousRevisionRows.length > 0) {
+    return cloneRowsForRevision(previousRevisionRows, tenderNumber, revisionNumber)
+  }
+
+  return existingRows
 }
 
 function getRowsForTenderRevision(
@@ -910,6 +1312,25 @@ function getRowsForTenderRevision(
       ]
 }
 
+function getPreviousRevisionRows(
+  items: BoqItem[],
+  tenderNumber: string,
+  targetRevision: string
+) {
+  const revisions = getRevisionNumbersForTender(items, tenderNumber)
+  const normalizedTarget = String(targetRevision || '').trim()
+  const previousRevision =
+    revisions.filter((revision) =>
+      compareRevisionNumbers(revision, normalizedTarget) < 0
+    ).at(-1) ||
+    revisions.filter((revision) => revision !== normalizedTarget).at(-1) ||
+    ''
+
+  return previousRevision
+    ? getRowsForTenderRevision(items, tenderNumber, previousRevision)
+    : []
+}
+
 function getRevisionDate(
   items: BoqItem[],
   tenderNumber: string,
@@ -923,6 +1344,116 @@ function getRevisionDate(
         item.revisionDate
     )?.revisionDate || ''
   )
+}
+
+function getRevisionNumbersForTender(items: BoqItem[], tenderNumber: string) {
+  return [...new Set(
+    items
+      .filter((item) => item.tenderNumber === tenderNumber)
+      .map((item) => String(item.revisionNumber || '').trim())
+  )].sort(compareRevisionNumbers)
+}
+
+function compareRevisionNumbers(left: string, right: string) {
+  const leftMatch = left.match(/\d+/g)
+  const rightMatch = right.match(/\d+/g)
+  const leftNumber = leftMatch ? Number(leftMatch.at(-1)) : -1
+  const rightNumber = rightMatch ? Number(rightMatch.at(-1)) : -1
+
+  if (leftNumber !== rightNumber) {
+    return leftNumber - rightNumber
+  }
+
+  return left.localeCompare(right)
+}
+
+function cloneRowsForRevision(
+  sourceRows: BoqItem[],
+  tenderNumber: string,
+  revisionNumber: string
+) {
+  return sourceRows.map((row, index) => ({
+    ...row,
+    id: createId('boq'),
+    sn: String(index + 1),
+    tenderNumber,
+    revisionNumber,
+    revisionDate: null,
+  }))
+}
+
+function getRevisionLabel(revisionNumber: string) {
+  return revisionNumber ? revisionNumber : 'Current Revision'
+}
+
+function getTenderProjectName(tenderLogs: TenderLog[], tenderNumber: string) {
+  return tenderLogs.find((tender) => tender.tenderNumber === tenderNumber)?.projectName || ''
+}
+
+function upsertCostingSnapshot(
+  snapshots: CostingRevisionSnapshot[],
+  snapshot: CostingRevisionSnapshot
+) {
+  const remaining = snapshots.filter((item) => item.id !== snapshot.id)
+
+  return [...remaining, snapshot].sort((left, right) => {
+    if (left.tenderNumber !== right.tenderNumber) {
+      return left.tenderNumber.localeCompare(right.tenderNumber)
+    }
+
+    return compareRevisionNumbers(left.revisionNumber, right.revisionNumber)
+  })
+}
+
+async function copyRevisionCostings({
+  sourceRows,
+  targetRows,
+  currentCostings,
+}: {
+  sourceRows: BoqItem[]
+  targetRows: BoqItem[]
+  currentCostings: TenderCosting[]
+}) {
+  const copyTasks = targetRows.map(async (targetRow) => {
+    const sourceRow =
+      sourceRows.find((row) => String(row.sn) === String(targetRow.sn)) ||
+      sourceRows.find(
+        (row) => row.description.trim() && row.description === targetRow.description
+      )
+
+    if (!sourceRow) {
+      return null
+    }
+
+    const sourceCosting = currentCostings.find(
+      (costing) => String(costing.boqItemId) === String(sourceRow.id)
+    )
+
+    if (!sourceCosting) {
+      return null
+    }
+
+    return saveTenderCosting({
+      ...sourceCosting,
+      id: 0,
+      boqItemId: targetRow.id,
+      tenderNumber: targetRow.tenderNumber,
+      material: sourceCosting.material.map((item) => ({ ...item })),
+      machining: sourceCosting.machining.map((item) => ({ ...item })),
+      coating: sourceCosting.coating.map((item) => ({ ...item })),
+      consumable: sourceCosting.consumable.map((item) => ({ ...item })),
+      subcontract: sourceCosting.subcontract.map((item) => ({ ...item })),
+      productionLabour: Object.fromEntries(
+        Object.entries(sourceCosting.productionLabour).map(([stage, value]) => [
+          stage,
+          { ...value },
+        ])
+      ) as TenderCosting['productionLabour'],
+      installationLabour: { ...sourceCosting.installationLabour },
+    })
+  })
+
+  return (await Promise.all(copyTasks)).filter(Boolean)
 }
 
 function getRowSummary(
@@ -947,6 +1478,66 @@ function getRowSummary(
     markup: row.markup,
     masterItems,
   })
+}
+
+function getTableTotals(
+  rows: BoqItem[],
+  costings: TenderCosting[],
+  masterItems: MasterListItem[]
+) {
+  return rows.reduce(
+    (totals, row) => {
+      const summary = getRowSummary(row, costings, masterItems)
+
+      if (!summary) return totals
+
+      return {
+        materialUnitCost:
+          totals.materialUnitCost + summary.materialUnitCost,
+        productionLabourUnitCost:
+          totals.productionLabourUnitCost + summary.productionLabourUnitCost,
+        machiningUnitCost:
+          totals.machiningUnitCost + summary.machiningUnitCost,
+        coatingUnitCost:
+          totals.coatingUnitCost + summary.coatingUnitCost,
+        consumableUnitCost:
+          totals.consumableUnitCost + summary.consumableUnitCost,
+        subcontractUnitCost:
+          totals.subcontractUnitCost + summary.subcontractUnitCost,
+        installationLabourUnitCost:
+          totals.installationLabourUnitCost + summary.installationLabourUnitCost,
+        supplyUnitCost:
+          totals.supplyUnitCost + summary.supplyUnitCost,
+        supplyTotalCost:
+          totals.supplyTotalCost + summary.supplyTotalCost,
+        installationUnitCost:
+          totals.installationUnitCost + summary.installationUnitCost,
+        installationTotalCost:
+          totals.installationTotalCost + summary.installationTotalCost,
+        unitCost: totals.unitCost + summary.unitCost,
+        totalCost: totals.totalCost + summary.totalCost,
+        sellingRate: totals.sellingRate + summary.sellingRate,
+        sellingAmount: totals.sellingAmount + summary.sellingAmount,
+      }
+    },
+    {
+      materialUnitCost: 0,
+      productionLabourUnitCost: 0,
+      machiningUnitCost: 0,
+      coatingUnitCost: 0,
+      consumableUnitCost: 0,
+      subcontractUnitCost: 0,
+      installationLabourUnitCost: 0,
+      supplyUnitCost: 0,
+      supplyTotalCost: 0,
+      installationUnitCost: 0,
+      installationTotalCost: 0,
+      unitCost: 0,
+      totalCost: 0,
+      sellingRate: 0,
+      sellingAmount: 0,
+    }
+  )
 }
 
 function getCommonValuesForRows(rows: BoqItem[]): CommonValues {

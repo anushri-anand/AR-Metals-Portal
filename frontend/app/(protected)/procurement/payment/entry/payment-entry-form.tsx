@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { reserveNextDocumentNumbers } from '@/lib/document-numbering'
 
 type PurchaseOrderItem = {
   line_number: number
@@ -32,6 +33,22 @@ type Phase = {
   paidDate: string
   invoiceNo: string
   invoiceDate: string
+  glNo: string
+  glDate: string
+}
+
+type ExistingProcurementPaymentRecord = {
+  phases?: Array<{
+    invoice_no?: string
+    gl_no?: string
+  }>
+}
+
+type ExistingAssociatedCostPaymentRecord = {
+  delivery_items?: Array<{
+    invoice_number?: string
+    gl_no?: string
+  }>
 }
 
 type FormState = {
@@ -70,6 +87,8 @@ function createEmptyPhase(): Phase {
     paidDate: '',
     invoiceNo: '',
     invoiceDate: '',
+    glNo: '',
+    glDate: '',
   }
 }
 
@@ -80,6 +99,8 @@ export default function PaymentEntryForm() {
   const [error, setError] = useState('')
   const [loadingPurchaseOrders, setLoadingPurchaseOrders] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [existingInvoiceNumbers, setExistingInvoiceNumbers] = useState<string[]>([])
+  const [existingGlNumbers, setExistingGlNumbers] = useState<string[]>([])
 
   const againstDeliveryTotal = form.deliveryItems.reduce(
     (total, item) =>
@@ -96,8 +117,20 @@ export default function PaymentEntryForm() {
   useEffect(() => {
     async function loadPurchaseOrders() {
       try {
-        const data = await fetchAPI('/procurement/purchase-order/')
-        setPurchaseOrders(data)
+        const [purchaseOrderData, paymentData, associatedCostPaymentData] = await Promise.all([
+          fetchAPI('/procurement/purchase-order/?status=approved'),
+          fetchAPI('/procurement/payment/'),
+          fetchAPI('/employees/associated-cost/payment/'),
+        ])
+        setPurchaseOrders(purchaseOrderData)
+        setExistingInvoiceNumbers([
+          ...collectProcurementInvoiceNumbers(paymentData),
+          ...collectAssociatedCostInvoiceNumbers(associatedCostPaymentData),
+        ])
+        setExistingGlNumbers([
+          ...collectProcurementGlNumbers(paymentData),
+          ...collectAssociatedCostGlNumbers(associatedCostPaymentData),
+        ])
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'Failed to load purchase orders.'
@@ -152,13 +185,34 @@ export default function PaymentEntryForm() {
     const phaseCount = Number(value || 0)
 
     setForm((prev) => {
+      const preservedPhases = prev.phases
+        .slice(0, Math.max(0, phaseCount))
+        .map((phase) => ({
+          ...createEmptyPhase(),
+          ...phase,
+        }))
+      const additionalCount = Math.max(0, phaseCount - preservedPhases.length)
+      const nextInvoiceNumbers = reserveNextDocumentNumbers(
+        [...existingInvoiceNumbers, ...preservedPhases.map((phase) => phase.invoiceNo)],
+        'INV',
+        additionalCount
+      )
+      const nextGlNumbers = reserveNextDocumentNumbers(
+        [...existingGlNumbers, ...preservedPhases.map((phase) => phase.glNo)],
+        'GL',
+        additionalCount
+      )
       const nextPhases =
-        phaseCount > 0
-          ? Array.from(
-              { length: phaseCount },
-              (_, index) => prev.phases[index] || createEmptyPhase()
-            )
-          : []
+        additionalCount > 0
+          ? [
+              ...preservedPhases,
+              ...Array.from({ length: additionalCount }, (_, index) => ({
+                ...createEmptyPhase(),
+                invoiceNo: nextInvoiceNumbers[index] || '',
+                glNo: nextGlNumbers[index] || '',
+              })),
+            ]
+          : preservedPhases
 
       return {
         ...prev,
@@ -210,7 +264,7 @@ export default function PaymentEntryForm() {
           po_number: form.poNumber,
           advance: form.advance || '0',
           recovery_advance: form.recoveryAdvance || '0',
-          delivery: formatMoney(againstDeliveryTotal),
+          delivery: againstDeliveryTotal.toFixed(2),
           retention: form.retention || '0',
           release_retention: form.releaseRetention || '0',
           delivery_items: form.deliveryItems.map((item) => ({
@@ -226,6 +280,8 @@ export default function PaymentEntryForm() {
             paid_date: phase.paidDate || null,
             invoice_no: phase.invoiceNo,
             invoice_date: phase.invoiceDate || null,
+            gl_no: phase.glNo,
+            gl_date: phase.glDate || null,
           })),
         }),
       })
@@ -404,7 +460,7 @@ export default function PaymentEntryForm() {
                         <td className="px-4 py-3">
                           <input
                             type="number"
-                            step="0.01"
+                            step="any"
                             value={item.receivedQuantity}
                             onChange={(e) =>
                               handleDeliveryItemChange(index, e.target.value)
@@ -454,7 +510,7 @@ export default function PaymentEntryForm() {
                 </h2>
 
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-                  <Field label="Amount">
+                  <Field label="Payable Amount">
                     <input
                       type="number"
                       step="0.01"
@@ -463,7 +519,7 @@ export default function PaymentEntryForm() {
                         handlePhaseChange(index, 'amount', e.target.value)
                       }
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-                      placeholder="Enter amount"
+                      placeholder="Enter payable amount"
                     />
                   </Field>
 
@@ -555,6 +611,38 @@ export default function PaymentEntryForm() {
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
                     />
                   </Field>
+
+                  <Field label="GL No.">
+                    <input
+                      value={phase.glNo}
+                      onChange={(e) =>
+                        handlePhaseChange(index, 'glNo', e.target.value)
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                      placeholder="Enter GL number"
+                    />
+                  </Field>
+
+                  <Field label="GL Date">
+                    <input
+                      type="date"
+                      value={phase.glDate}
+                      onChange={(e) =>
+                        handlePhaseChange(index, 'glDate', e.target.value)
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                    />
+                  </Field>
+
+                  <Field label="Balance to be Paid">
+                    <input
+                      value={formatMoney(
+                        Number(phase.amount || 0) - Number(phase.paidIncVat || 0)
+                      )}
+                      readOnly
+                      className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
+                    />
+                  </Field>
                 </div>
               </div>
             ))}
@@ -595,12 +683,52 @@ function Field({
   )
 }
 
+function collectProcurementInvoiceNumbers(data: unknown) {
+  return (Array.isArray(data) ? data : []).flatMap((record: ExistingProcurementPaymentRecord) =>
+    (record.phases || []).map((phase) => String(phase.invoice_no || '').trim()).filter(Boolean)
+  )
+}
+
+function collectProcurementGlNumbers(data: unknown) {
+  return (Array.isArray(data) ? data : []).flatMap((record: ExistingProcurementPaymentRecord) =>
+    (record.phases || []).map((phase) => String(phase.gl_no || '').trim()).filter(Boolean)
+  )
+}
+
+function collectAssociatedCostInvoiceNumbers(data: unknown) {
+  return (Array.isArray(data) ? data : []).flatMap(
+    (record: ExistingAssociatedCostPaymentRecord) =>
+      (record.delivery_items || [])
+        .map((item) => String(item.invoice_number || '').trim())
+        .filter(Boolean)
+  )
+}
+
+function collectAssociatedCostGlNumbers(data: unknown) {
+  return (Array.isArray(data) ? data : []).flatMap(
+    (record: ExistingAssociatedCostPaymentRecord) =>
+      (record.delivery_items || [])
+        .map((item) => String(item.gl_no || '').trim())
+        .filter(Boolean)
+  )
+}
+
 function formatMoney(value: number) {
-  return value.toFixed(2)
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 }
 
 function formatNumber(value: string) {
-  return Number(value || 0).toLocaleString(undefined, {
-    maximumFractionDigits: 2,
+  const parsed = Number(String(value ?? '').trim())
+
+  if (!Number.isFinite(parsed)) {
+    return '0'
+  }
+
+  return parsed.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 6,
   })
 }

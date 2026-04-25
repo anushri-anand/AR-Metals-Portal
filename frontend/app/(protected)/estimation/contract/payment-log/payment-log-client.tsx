@@ -22,6 +22,7 @@ const initialForm = {
   submittedReleaseRetention: '',
   netSubmittedAmount: '',
   submittedVat: '',
+  submittedVatAmount: '',
   netSubmittedIncVat: '',
   approvedAdvance: '',
   approvedRecoveryAdvance: '',
@@ -30,9 +31,11 @@ const initialForm = {
   approvedReleaseRetention: '',
   netApprovedAmount: '',
   approvedVat: '',
+  approvedVatAmount: '',
   netApprovedIncVat: '',
   dueDate: '',
   paidDate: '',
+  paidAmount: '',
   forecastDate: '',
 }
 
@@ -80,6 +83,28 @@ export default function ContractPaymentLogClient() {
   )
 
   const delayText = getDelayText(form.dueDate, form.paidDate)
+  const submittedNetAmount = getPaymentNetAmount({
+    advance: form.submittedAdvance,
+    recoveryAdvance: form.submittedRecoveryAdvance,
+    grossAmount: form.grossSubmittedAmount,
+    retention: form.submittedRetention,
+    releaseRetention: form.submittedReleaseRetention,
+  })
+  const submittedVatAmount = getVatAmount(
+    submittedNetAmount,
+    form.submittedVat
+  )
+  const submittedIncVat = submittedNetAmount + submittedVatAmount
+  const approvedNetAmount = getPaymentNetAmount({
+    advance: form.approvedAdvance,
+    recoveryAdvance: form.approvedRecoveryAdvance,
+    grossAmount: form.grossApprovedAmount,
+    retention: form.approvedRetention,
+    releaseRetention: form.approvedReleaseRetention,
+  })
+  const approvedVatAmount = getVatAmount(approvedNetAmount, form.approvedVat)
+  const approvedIncVat = approvedNetAmount + approvedVatAmount
+  const balanceAmount = approvedIncVat - toNumber(form.paidAmount)
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target
@@ -123,19 +148,22 @@ export default function ContractPaymentLogClient() {
         grossSubmittedAmount: toNumber(form.grossSubmittedAmount),
         submittedRetention: toNumber(form.submittedRetention),
         submittedReleaseRetention: toNumber(form.submittedReleaseRetention),
-        netSubmittedAmount: toNumber(form.netSubmittedAmount),
+        netSubmittedAmount: submittedNetAmount,
         submittedVat: toNumber(form.submittedVat),
-        netSubmittedIncVat: toNumber(form.netSubmittedIncVat),
+        submittedVatAmount,
+        netSubmittedIncVat: submittedIncVat,
         approvedAdvance: toNumber(form.approvedAdvance),
         approvedRecoveryAdvance: toNumber(form.approvedRecoveryAdvance),
         grossApprovedAmount: toNumber(form.grossApprovedAmount),
         approvedRetention: toNumber(form.approvedRetention),
         approvedReleaseRetention: toNumber(form.approvedReleaseRetention),
-        netApprovedAmount: toNumber(form.netApprovedAmount),
+        netApprovedAmount: approvedNetAmount,
         approvedVat: toNumber(form.approvedVat),
-        netApprovedIncVat: toNumber(form.netApprovedIncVat),
+        approvedVatAmount,
+        netApprovedIncVat: approvedIncVat,
         dueDate: form.dueDate || null,
         paidDate: form.paidDate || null,
+        paidAmount: toNumber(form.paidAmount),
         forecastDate: form.forecastDate || null,
       })
 
@@ -166,7 +194,6 @@ export default function ContractPaymentLogClient() {
         <p className="mt-2 text-slate-700">
           Record submitted and approved payment values for each project.
         </p>
-        {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       </div>
 
@@ -237,23 +264,23 @@ export default function ContractPaymentLogClient() {
               value={form.submittedReleaseRetention}
               onChange={handleChange}
             />
-            <MoneyField
+            <ReadOnlyMoneyField
               label="Net Amount"
-              name="netSubmittedAmount"
-              value={form.netSubmittedAmount}
-              onChange={handleChange}
+              value={submittedNetAmount}
             />
             <MoneyField
-              label="VAT"
+              label="VAT (%)"
               name="submittedVat"
               value={form.submittedVat}
               onChange={handleChange}
             />
-            <MoneyField
+            <ReadOnlyMoneyField
+              label="VAT Amount"
+              value={submittedVatAmount}
+            />
+            <ReadOnlyMoneyField
               label="Net Amount Inc VAT"
-              name="netSubmittedIncVat"
-              value={form.netSubmittedIncVat}
-              onChange={handleChange}
+              value={submittedIncVat}
             />
           </div>
         </div>
@@ -300,28 +327,28 @@ export default function ContractPaymentLogClient() {
               value={form.approvedReleaseRetention}
               onChange={handleChange}
             />
-            <MoneyField
+            <ReadOnlyMoneyField
               label="Net Amount"
-              name="netApprovedAmount"
-              value={form.netApprovedAmount}
-              onChange={handleChange}
+              value={approvedNetAmount}
             />
             <MoneyField
-              label="VAT"
+              label="VAT (%)"
               name="approvedVat"
               value={form.approvedVat}
               onChange={handleChange}
             />
-            <MoneyField
-              label="Net Amount Inc VAT"
-              name="netApprovedIncVat"
-              value={form.netApprovedIncVat}
-              onChange={handleChange}
+            <ReadOnlyMoneyField
+              label="VAT Amount"
+              value={approvedVatAmount}
+            />
+            <ReadOnlyMoneyField
+              label="Net Receivable Inc VAT"
+              value={approvedIncVat}
             />
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3 xl:grid-cols-6">
           <Field label="Due Date">
             <input
               type="date"
@@ -332,7 +359,7 @@ export default function ContractPaymentLogClient() {
             />
           </Field>
 
-          <Field label="Paid Date">
+          <Field label="Received Date">
             <input
               type="date"
               name="paidDate"
@@ -342,6 +369,13 @@ export default function ContractPaymentLogClient() {
             />
           </Field>
 
+          <MoneyField
+            label="Received Amount"
+            name="paidAmount"
+            value={form.paidAmount}
+            onChange={handleChange}
+          />
+
           <Field label="Delay">
             <input
               value={delayText}
@@ -349,6 +383,11 @@ export default function ContractPaymentLogClient() {
               readOnly
             />
           </Field>
+
+          <ReadOnlyMoneyField
+            label="Balance Receivable"
+            value={balanceAmount}
+          />
 
           <Field label="Forecast Date">
             <input
@@ -361,13 +400,16 @@ export default function ContractPaymentLogClient() {
           </Field>
         </div>
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {saving ? 'Saving...' : 'Save Payment'}
-        </button>
+        <div className="space-y-3">
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? 'Saving...' : 'Save Payment'}
+          </button>
+          {message && <p className="text-sm text-green-700">{message}</p>}
+        </div>
       </form>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -379,7 +421,7 @@ export default function ContractPaymentLogClient() {
           </p>
         </div>
         <div className="max-h-[70vh] w-full max-w-full overflow-auto">
-          <table className="min-w-[3200px] text-sm">
+          <table className="min-w-[3500px] text-sm">
             <thead className="sticky top-0 z-10 bg-slate-50 text-left text-slate-700">
               <tr>
                 <th className="px-4 py-3 font-semibold" rowSpan={2}>
@@ -391,20 +433,26 @@ export default function ContractPaymentLogClient() {
                 <th className="px-4 py-3 font-semibold" rowSpan={2}>
                   SN
                 </th>
-                <th className="px-4 py-3 text-center font-semibold" colSpan={9}>
+                <th className="px-4 py-3 text-center font-semibold" colSpan={10}>
                   Submitted
                 </th>
-                <th className="px-4 py-3 text-center font-semibold" colSpan={9}>
+                <th className="px-4 py-3 text-center font-semibold" colSpan={10}>
                   Approved
                 </th>
                 <th className="px-4 py-3 font-semibold" rowSpan={2}>
                   Due Date
                 </th>
                 <th className="px-4 py-3 font-semibold" rowSpan={2}>
-                  Paid Date
+                  Received Date
+                </th>
+                <th className="px-4 py-3 font-semibold" rowSpan={2}>
+                  Received Amount
                 </th>
                 <th className="px-4 py-3 font-semibold" rowSpan={2}>
                   Delay
+                </th>
+                <th className="px-4 py-3 font-semibold" rowSpan={2}>
+                  Balance Receivable
                 </th>
                 <th className="px-4 py-3 font-semibold" rowSpan={2}>
                   Forecast Date
@@ -418,7 +466,8 @@ export default function ContractPaymentLogClient() {
                 <th className="px-4 py-3 font-semibold">Retention</th>
                 <th className="px-4 py-3 font-semibold">Release of Retention</th>
                 <th className="px-4 py-3 font-semibold">Net Amount</th>
-                <th className="px-4 py-3 font-semibold">VAT</th>
+                <th className="px-4 py-3 font-semibold">VAT (%)</th>
+                <th className="px-4 py-3 font-semibold">VAT Amount</th>
                 <th className="px-4 py-3 font-semibold">Net Amount Inc VAT</th>
                 <th className="px-4 py-3 font-semibold">Date</th>
                 <th className="px-4 py-3 font-semibold">Advance</th>
@@ -427,8 +476,9 @@ export default function ContractPaymentLogClient() {
                 <th className="px-4 py-3 font-semibold">Retention</th>
                 <th className="px-4 py-3 font-semibold">Release of Retention</th>
                 <th className="px-4 py-3 font-semibold">Net Amount</th>
-                <th className="px-4 py-3 font-semibold">VAT</th>
-                <th className="px-4 py-3 font-semibold">Net Amount Inc VAT</th>
+                <th className="px-4 py-3 font-semibold">VAT (%)</th>
+                <th className="px-4 py-3 font-semibold">VAT Amount</th>
+                <th className="px-4 py-3 font-semibold">Net Receivable Inc VAT</th>
               </tr>
             </thead>
             <tbody>
@@ -447,6 +497,7 @@ export default function ContractPaymentLogClient() {
                   <MoneyCell value={log.submittedReleaseRetention} />
                   <MoneyCell value={log.netSubmittedAmount} />
                   <MoneyCell value={log.submittedVat} />
+                  <MoneyCell value={log.submittedVatAmount} />
                   <MoneyCell value={log.netSubmittedIncVat} />
                   <td className="px-4 py-3 text-slate-700">
                     {formatDate(log.approvedDate)}
@@ -458,6 +509,7 @@ export default function ContractPaymentLogClient() {
                   <MoneyCell value={log.approvedReleaseRetention} />
                   <MoneyCell value={log.netApprovedAmount} />
                   <MoneyCell value={log.approvedVat} />
+                  <MoneyCell value={log.approvedVatAmount} />
                   <MoneyCell value={log.netApprovedIncVat} />
                   <td className="px-4 py-3 text-slate-700">
                     {formatDate(log.dueDate)}
@@ -465,9 +517,11 @@ export default function ContractPaymentLogClient() {
                   <td className="px-4 py-3 text-slate-700">
                     {formatDate(log.paidDate)}
                   </td>
+                  <MoneyCell value={log.paidAmount} />
                   <td className="px-4 py-3 text-slate-700">
                     {getDelayText(log.dueDate, log.paidDate)}
                   </td>
+                  <MoneyCell value={log.netApprovedIncVat - log.paidAmount} />
                   <td className="px-4 py-3 text-slate-700">
                     {formatDate(log.forecastDate)}
                   </td>
@@ -476,7 +530,7 @@ export default function ContractPaymentLogClient() {
 
               {visibleLogs.length === 0 && (
                 <tr>
-                  <td className="px-4 py-6 text-center text-slate-500" colSpan={25}>
+                  <td className="px-4 py-6 text-center text-slate-500" colSpan={29}>
                     No payment logs saved yet.
                   </td>
                 </tr>
@@ -510,6 +564,24 @@ function MoneyField({
         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
         min="0"
         step="0.01"
+      />
+    </Field>
+  )
+}
+
+function ReadOnlyMoneyField({
+  label,
+  value,
+}: {
+  label: string
+  value: number
+}) {
+  return (
+    <Field label={label}>
+      <input
+        value={formatMoney(value)}
+        readOnly
+        className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
       />
     </Field>
   )
@@ -557,6 +629,32 @@ function getDelayText(dueDate: string | null, paidDate: string | null) {
 
 function getNextSn(logs: ContractPaymentLog[]) {
   return logs.reduce((maxSn, log) => Math.max(maxSn, log.sn), 0) + 1
+}
+
+function getPaymentNetAmount({
+  advance,
+  recoveryAdvance,
+  grossAmount,
+  retention,
+  releaseRetention,
+}: {
+  advance: string
+  recoveryAdvance: string
+  grossAmount: string
+  retention: string
+  releaseRetention: string
+}) {
+  return (
+    toNumber(advance) -
+    toNumber(recoveryAdvance) +
+    toNumber(grossAmount) -
+    toNumber(retention) +
+    toNumber(releaseRetention)
+  )
+}
+
+function getVatAmount(netAmount: number, vatPercent: string) {
+  return netAmount * (toNumber(vatPercent) / 100)
 }
 
 function toNumber(value: unknown) {

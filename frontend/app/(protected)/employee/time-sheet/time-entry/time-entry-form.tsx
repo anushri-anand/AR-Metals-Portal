@@ -58,6 +58,7 @@ const timeOptions = Array.from({ length: 96 }, (_, index) => {
   
 export default function TimeEntryForm() {
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([])
+  const [publicHolidayDates, setPublicHolidayDates] = useState<string[]>([])
   const [form, setForm] = useState<FormState>(initialForm)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -67,11 +68,15 @@ export default function TimeEntryForm() {
   useEffect(() => {
     async function loadEmployeeOptions() {
       try {
-        const data = await fetchAPI('/employees/options/')
-        setEmployeeOptions(data)
+        const [employeeData, holidayData] = await Promise.all([
+          fetchAPI('/employees/options/'),
+          fetchAPI('/employees/time-sheet/public-holidays/'),
+        ])
+        setEmployeeOptions(employeeData)
+        setPublicHolidayDates(Array.isArray(holidayData) ? holidayData : [])
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : 'Failed to load employee options.'
+          err instanceof Error ? err.message : 'Failed to load time entry options.'
         )
       }
     }
@@ -100,6 +105,21 @@ export default function TimeEntryForm() {
   
     loadEmployeeCategory()
   }, [form.employeeId])
+
+  useEffect(() => {
+    if (!form.date) {
+      return
+    }
+
+    if (!publicHolidayDates.includes(form.date) || form.isPublicHoliday) {
+      return
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      isPublicHoliday: true,
+    }))
+  }, [form.date, form.isPublicHoliday, publicHolidayDates])
   
 
   const day = useMemo(() => {
@@ -147,8 +167,8 @@ export default function TimeEntryForm() {
     if (employeeCategory !== 'Labour') return 0
     if (isLeaveOrAbsent) return 0
     if (!form.isPublicHoliday) return 0
-    return extraHours
-  }, [extraHours, form.isPublicHoliday, isLeaveOrAbsent, employeeCategory])
+    return totalTime > 6 ? Math.max(totalTime - 1, 0) : totalTime
+  }, [employeeCategory, form.isPublicHoliday, isLeaveOrAbsent, totalTime])
   
   function handleEmployeeIdChange(value: string) {
     const selectedEmployee = employeeOptions.find(
@@ -250,6 +270,11 @@ export default function TimeEntryForm() {
         }),
       })
 
+      if (form.isPublicHoliday && form.date) {
+        setPublicHolidayDates((prev) =>
+          prev.includes(form.date) ? prev : [...prev, form.date]
+        )
+      }
       setForm(initialForm)
       setMessage('Time entry saved successfully.')
     } catch (err) {
@@ -311,7 +336,14 @@ export default function TimeEntryForm() {
                 type="date"
                 name="date"
                 value={form.date}
-                onChange={handleChange}
+                onChange={(e) => {
+                  const nextDate = e.target.value
+                  setForm((prev) => ({
+                    ...prev,
+                    date: nextDate,
+                    isPublicHoliday: publicHolidayDates.includes(nextDate),
+                  }))
+                }}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
                 required
               />
@@ -517,5 +549,8 @@ function timeToMinutes(value: string) {
 }
 
 function formatHours(value: number) {
-  return value.toFixed(2)
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 }

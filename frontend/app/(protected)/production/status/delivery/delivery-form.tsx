@@ -1,43 +1,42 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import {
+  getBoqSnOptions,
+  getItemNameOptions,
+  getPackageOptions,
+  getSelectedItem,
+  getVariationOptions,
+  type ProductionItemSelection,
+  type ProductionProjectOption,
+  updateProjectItemSelection,
+} from '@/lib/production-selection'
 
-type ProjectItem = {
-  id: number
-  item_name: string
-  quantity: string
-  unit: string
-}
-
-type ProjectOption = {
-  id: number
-  project_name: string
-  project_number: string
-  items: ProjectItem[]
-}
-
-type FormState = {
+type FormState = ProductionItemSelection & {
   date: string
-  projectName: string
-  itemName: string
   deliveryNoteNumber: string
   quantity: string
 }
 
 const initialForm: FormState = {
   date: '',
+  projectNumber: '',
+  variationNumber: '',
   projectName: '',
+  package: '',
   itemName: '',
+  boqSn: '',
   deliveryNoteNumber: '',
   quantity: '',
 }
 
 export default function DeliveryForm() {
-  const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
+  const [projectOptions, setProjectOptions] = useState<ProductionProjectOption[]>([])
   const [form, setForm] = useState<FormState>(initialForm)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     async function loadProjects() {
@@ -49,37 +48,62 @@ export default function DeliveryForm() {
       }
     }
 
-    loadProjects()
+    void loadProjects()
   }, [])
 
-  const selectedProject = projectOptions.find(
-    (project) => project.project_name === form.projectName
-  )
+  const variationOptions = getVariationOptions(form, projectOptions)
+  const packageOptions = getPackageOptions(form, projectOptions)
+  const itemNameOptions = getItemNameOptions(form, projectOptions)
+  const boqSnOptions = getBoqSnOptions(form, projectOptions)
+  const selectedItem = getSelectedItem(form, projectOptions)
 
-  const itemOptions = selectedProject ? selectedProject.items : []
+  function handleSelectionChange(
+    field: keyof ProductionItemSelection,
+    value: string
+  ) {
+    setForm((prev) => ({
+      ...prev,
+      ...updateProjectItemSelection(prev, field, value, projectOptions),
+    }))
+  }
 
-  const selectedItem = useMemo(() => {
-    return itemOptions.find((item) => item.item_name === form.itemName)
-  }, [itemOptions, form.itemName])
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target
 
     setForm((prev) => ({
       ...prev,
       [name]: value,
-      itemName: name === 'projectName' ? '' : prev.itemName,
     }))
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setMessage('Delivery form structure is ready. Backend save will be connected next.')
-    console.log({
-      ...form,
-      totalQuantity: selectedItem?.quantity || '',
-      unit: selectedItem?.unit || '',
-    })
+    setMessage('')
+    setError('')
+    setSaving(true)
+
+    try {
+      await fetchAPI('/production/status/delivery/entry/', {
+        method: 'POST',
+        body: JSON.stringify({
+          date: form.date,
+          project_number: form.projectNumber,
+          project_name: form.projectName,
+          variation_number: form.variationNumber,
+          item_name: form.itemName,
+          boq_sn: form.boqSn,
+          delivery_note_number: form.deliveryNoteNumber,
+          quantity: form.quantity,
+        }),
+      })
+
+      setForm(initialForm)
+      setMessage('Delivery saved successfully.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save delivery.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -95,7 +119,7 @@ export default function DeliveryForm() {
         onSubmit={handleSubmit}
         className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
       >
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
           <Field label="Date">
             <input
               type="date"
@@ -107,11 +131,44 @@ export default function DeliveryForm() {
             />
           </Field>
 
+          <Field label="Project #">
+            <select
+              value={form.projectNumber}
+              onChange={(e) => handleSelectionChange('projectNumber', e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              required
+            >
+              <option value="">Select project #</option>
+              {projectOptions.map((project) => (
+                <option key={project.id} value={project.project_number}>
+                  {project.project_number}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Variation #">
+            <select
+              value={form.variationNumber}
+              onChange={(e) =>
+                handleSelectionChange('variationNumber', e.target.value)
+              }
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              disabled={!form.projectNumber && !form.projectName}
+            >
+              <option value="">Base Project</option>
+              {variationOptions.map((variation) => (
+                <option key={variation.id} value={variation.variation_number}>
+                  {variation.variation_number}
+                </option>
+              ))}
+            </select>
+          </Field>
+
           <Field label="Project Name">
             <select
-              name="projectName"
               value={form.projectName}
-              onChange={handleChange}
+              onChange={(e) => handleSelectionChange('projectName', e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
               required
             >
@@ -124,19 +181,57 @@ export default function DeliveryForm() {
             </select>
           </Field>
 
+          <Field label="Package">
+            <select
+              value={form.package}
+              onChange={(e) => handleSelectionChange('package', e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              disabled={
+                !form.projectNumber || Boolean(form.variationNumber) || packageOptions.length === 0
+              }
+            >
+              <option value="">
+                {form.variationNumber ? 'Variation item - no package' : 'Select package'}
+              </option>
+              {packageOptions.map((itemPackage) => (
+                <option key={itemPackage} value={itemPackage}>
+                  {itemPackage}
+                </option>
+              ))}
+            </select>
+          </Field>
+
           <Field label="Item">
             <select
-              name="itemName"
               value={form.itemName}
-              onChange={handleChange}
+              onChange={(e) => handleSelectionChange('itemName', e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
               required
-              disabled={!form.projectName}
+              disabled={!form.projectNumber && !form.projectName}
             >
               <option value="">Select item</option>
-              {itemOptions.map((item) => (
-                <option key={item.id} value={item.item_name}>
-                  {item.item_name}
+              {itemNameOptions.map((itemName) => (
+                <option key={itemName} value={itemName}>
+                  {itemName}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="BOQ SN">
+            <select
+              value={form.boqSn}
+              onChange={(e) => handleSelectionChange('boqSn', e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              required={!form.variationNumber && boqSnOptions.length > 1}
+              disabled={!form.itemName || Boolean(form.variationNumber)}
+            >
+              <option value="">
+                {form.variationNumber ? 'Variation item - no BOQ SN' : 'Select BOQ SN'}
+              </option>
+              {boqSnOptions.map((boqSn) => (
+                <option key={boqSn} value={boqSn}>
+                  {boqSn}
                 </option>
               ))}
             </select>
@@ -172,7 +267,7 @@ export default function DeliveryForm() {
           <Field label="Quantity">
             <input
               type="number"
-              step="0.01"
+              step="any"
               min="0"
               name="quantity"
               value={form.quantity}
@@ -187,9 +282,10 @@ export default function DeliveryForm() {
         <div className="mt-8 flex items-center gap-4">
           <button
             type="submit"
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"
+            disabled={saving}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
           >
-            Save
+            {saving ? 'Saving...' : 'Save'}
           </button>
 
           {message && <p className="text-sm text-green-700">{message}</p>}

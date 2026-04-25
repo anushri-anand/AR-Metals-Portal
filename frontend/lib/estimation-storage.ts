@@ -30,6 +30,8 @@ export type TenderLog = {
   contactName: string
   projectName: string
   projectLocation: string
+  geography: GeographyType
+  typeOfContract: ContractType
   tenderDate: string | null
   revisionNumber: string
   revisionDate: string | null
@@ -48,6 +50,8 @@ export type TenderLogInput = {
   clientId?: string | number | null
   projectName: string
   projectLocation: string
+  geography: GeographyType
+  typeOfContract: ContractType
   description: string
   sellingAmount: number
   tenderDate: string | null
@@ -55,6 +59,17 @@ export type TenderLogInput = {
   status: string
   remarks: string
 }
+
+export const contractTypeOptions = [
+  'Re-measurable',
+  'Lumpsum',
+  'Cost Plus',
+] as const
+
+export const geographyOptions = ['UAE', 'GCC', 'Others'] as const
+
+export type ContractType = (typeof contractTypeOptions)[number]
+export type GeographyType = (typeof geographyOptions)[number]
 
 export type ContractRevenueVariation = {
   id?: string | number
@@ -81,6 +96,18 @@ export type ContractRevenue = {
   budgetFoh: number
   budgetCommitments: number
   budgetContingencies: number
+  variationBudgetMaterial: number
+  variationBudgetMachining: number
+  variationBudgetCoating: number
+  variationBudgetConsumables: number
+  variationBudgetSubcontracts: number
+  variationBudgetProductionLabour: number
+  variationBudgetFreightCustom: number
+  variationBudgetInstallationLabour: number
+  variationBudgetPrelims: number
+  variationBudgetFoh: number
+  variationBudgetCommitments: number
+  variationBudgetContingencies: number
   variations: ContractRevenueVariation[]
 }
 
@@ -123,6 +150,7 @@ export type ContractPaymentLog = {
   submittedReleaseRetention: number
   netSubmittedAmount: number
   submittedVat: number
+  submittedVatAmount: number
   netSubmittedIncVat: number
   approvedAdvance: number
   approvedRecoveryAdvance: number
@@ -131,13 +159,27 @@ export type ContractPaymentLog = {
   approvedReleaseRetention: number
   netApprovedAmount: number
   approvedVat: number
+  approvedVatAmount: number
   netApprovedIncVat: number
   dueDate: string | null
   paidDate: string | null
+  paidAmount: number
   forecastDate: string | null
 }
 
 export type ContractPaymentLogInput = Omit<ContractPaymentLog, 'id'>
+
+export type CostingRevisionSnapshot = {
+  id: number
+  tenderNumber: string
+  projectName: string
+  revisionNumber: string
+  status: 'submitted' | 'approved'
+  submittedBy: string
+  approvedBy: string
+  submittedAt: string
+  approvedAt: string | null
+}
 
 export type BoqItem = {
   id: string | number
@@ -146,6 +188,7 @@ export type BoqItem = {
   revisionNumber: string
   revisionDate: string | null
   clientsBoq: string
+  package: string
   description: string
   quantity: number
   unit: string
@@ -179,9 +222,7 @@ export const labourStageNames = [
   'Fabrication',
   'Welding',
   'Finishing',
-  'Coating',
   'Assembly',
-  'Installation',
   'Packing',
 ] as const
 
@@ -285,6 +326,39 @@ export async function createContractPaymentLog(
     await fetchAPI('/estimation/contract/payment-log/', {
       method: 'POST',
       body: JSON.stringify(item),
+    })
+  )
+}
+
+export async function getCostingRevisionSnapshots(): Promise<CostingRevisionSnapshot[]> {
+  const snapshots = await fetchAPI('/estimation/costing-snapshots/')
+
+  return snapshots.map(normalizeCostingRevisionSnapshot)
+}
+
+export async function submitCostingRevisionSnapshot(input: {
+  tenderNumber: string
+  projectName: string
+  revisionNumber: string
+}): Promise<CostingRevisionSnapshot> {
+  return normalizeCostingRevisionSnapshot(
+    await fetchAPI('/estimation/costing-snapshots/', {
+      method: 'POST',
+      body: JSON.stringify({
+        tender_number: input.tenderNumber,
+        project_name: input.projectName,
+        revision_number: input.revisionNumber,
+      }),
+    })
+  )
+}
+
+export async function approveCostingRevisionSnapshot(
+  id: number
+): Promise<CostingRevisionSnapshot> {
+  return normalizeCostingRevisionSnapshot(
+    await fetchAPI(`/estimation/costing-snapshots/${id}/approve/`, {
+      method: 'POST',
     })
   )
 }
@@ -581,13 +655,14 @@ export function calculateCostSummary({
   const supplyTotalCost = supplyUnitCost * toNumber(boqQuantity)
   const installationTotalCost = installationUnitCost * toNumber(boqQuantity)
   const baseUnitCost = supplyUnitCost + installationUnitCost
-  const costPercentage =
-    toNumber(freightCustomDutyPercent) +
-    toNumber(prelimsPercent) +
+  const indirectPercentTotal =
     toNumber(fohPercent) +
     toNumber(commitmentsPercent) +
     toNumber(contingenciesPercent)
-  const percentageUnitCost = baseUnitCost * (costPercentage / 100)
+  const freightCustomUnitCost =
+    baseUnitCost * (toNumber(freightCustomDutyPercent) / 100)
+  const prelimsUnitCost = baseUnitCost * (toNumber(prelimsPercent) / 100)
+  const percentageUnitCost = freightCustomUnitCost + prelimsUnitCost
   const unitCost = baseUnitCost + percentageUnitCost
   const totalCost = unitCost * toNumber(boqQuantity)
   const sellingRate = unitCost * toNumber(markup)
@@ -601,6 +676,9 @@ export function calculateCostSummary({
     consumableUnitCost,
     subcontractUnitCost,
     installationLabourUnitCost,
+    freightCustomUnitCost,
+    prelimsUnitCost,
+    indirectPercentTotal,
     supplyUnitCost,
     supplyTotalCost,
     installationUnitCost,
@@ -655,6 +733,9 @@ function normalizeTenderLog(item: TenderLog): TenderLog {
     quoteRef: item.quoteRef || '',
     contactName: item.contactName || '',
     projectLocation: item.projectLocation || '',
+    geography: (item.geography as GeographyType) || geographyOptions[0],
+    typeOfContract:
+      (item.typeOfContract as ContractType) || contractTypeOptions[0],
     revisionNumber: item.revisionNumber || '',
     revisionDate: item.revisionDate || null,
     description: item.description || '',
@@ -665,6 +746,7 @@ function normalizeTenderLog(item: TenderLog): TenderLog {
 function normalizeBoqItem(item: BoqItem): BoqItem {
   return {
     ...item,
+    package: item.package || '',
     revisionNumber: item.revisionNumber || '',
     revisionDate: item.revisionDate || null,
     quantity: toNumber(item.quantity),
@@ -674,6 +756,26 @@ function normalizeBoqItem(item: BoqItem): BoqItem {
     commitmentsPercent: toNumber(item.commitmentsPercent),
     contingenciesPercent: toNumber(item.contingenciesPercent),
     markup: toNumber(item.markup),
+  }
+}
+
+function normalizeCostingRevisionSnapshot(
+  item: Record<string, unknown>
+): CostingRevisionSnapshot {
+  return {
+    id: Number(item.id || 0),
+    tenderNumber: String(item.tender_number || item.tenderNumber || ''),
+    projectName: String(item.project_name || item.projectName || ''),
+    revisionNumber: String(item.revision_number || item.revisionNumber || ''),
+    status:
+      String(item.status || 'submitted') === 'approved' ? 'approved' : 'submitted',
+    submittedBy: String(item.submitted_by || item.submittedBy || ''),
+    approvedBy: String(item.approved_by || item.approvedBy || ''),
+    submittedAt: String(item.submitted_at || item.submittedAt || ''),
+    approvedAt:
+      item.approved_at || item.approvedAt
+        ? String(item.approved_at || item.approvedAt)
+        : null,
   }
 }
 
@@ -708,6 +810,20 @@ function normalizeContractRevenue(item: ContractRevenue): ContractRevenue {
     budgetFoh: toNumber(item.budgetFoh),
     budgetCommitments: toNumber(item.budgetCommitments),
     budgetContingencies: toNumber(item.budgetContingencies),
+    variationBudgetMaterial: toNumber(item.variationBudgetMaterial),
+    variationBudgetMachining: toNumber(item.variationBudgetMachining),
+    variationBudgetCoating: toNumber(item.variationBudgetCoating),
+    variationBudgetConsumables: toNumber(item.variationBudgetConsumables),
+    variationBudgetSubcontracts: toNumber(item.variationBudgetSubcontracts),
+    variationBudgetProductionLabour: toNumber(item.variationBudgetProductionLabour),
+    variationBudgetFreightCustom: toNumber(item.variationBudgetFreightCustom),
+    variationBudgetInstallationLabour: toNumber(
+      item.variationBudgetInstallationLabour
+    ),
+    variationBudgetPrelims: toNumber(item.variationBudgetPrelims),
+    variationBudgetFoh: toNumber(item.variationBudgetFoh),
+    variationBudgetCommitments: toNumber(item.variationBudgetCommitments),
+    variationBudgetContingencies: toNumber(item.variationBudgetContingencies),
     variations: (item.variations || []).map((variation) => ({
       ...variation,
       amount: toNumber(variation.amount),
@@ -747,6 +863,7 @@ function normalizeContractPaymentLog(item: ContractPaymentLog): ContractPaymentL
     submittedReleaseRetention: toNumber(item.submittedReleaseRetention),
     netSubmittedAmount: toNumber(item.netSubmittedAmount),
     submittedVat: toNumber(item.submittedVat),
+    submittedVatAmount: toNumber(item.submittedVatAmount),
     netSubmittedIncVat: toNumber(item.netSubmittedIncVat),
     approvedAdvance: toNumber(item.approvedAdvance),
     approvedRecoveryAdvance: toNumber(item.approvedRecoveryAdvance),
@@ -755,9 +872,11 @@ function normalizeContractPaymentLog(item: ContractPaymentLog): ContractPaymentL
     approvedReleaseRetention: toNumber(item.approvedReleaseRetention),
     netApprovedAmount: toNumber(item.netApprovedAmount),
     approvedVat: toNumber(item.approvedVat),
+    approvedVatAmount: toNumber(item.approvedVatAmount),
     netApprovedIncVat: toNumber(item.netApprovedIncVat),
     dueDate: item.dueDate || null,
     paidDate: item.paidDate || null,
+    paidAmount: toNumber(item.paidAmount),
     forecastDate: item.forecastDate || null,
   }
 }

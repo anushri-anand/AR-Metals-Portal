@@ -25,7 +25,7 @@ export default function MasterListEntryClient() {
   useEffect(() => {
     async function loadPurchaseOrders() {
       try {
-        const purchaseOrderData = await fetchAPI('/procurement/purchase-order/')
+        const purchaseOrderData = await fetchAPI('/procurement/purchase-order/?status=approved')
         setPurchaseOrders(
           Array.isArray(purchaseOrderData) ? purchaseOrderData : []
         )

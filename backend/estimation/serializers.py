@@ -4,10 +4,12 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from procurement.models import PurchaseOrder
+from shared.company import CurrentCompanyDefault
 
 from .models import (
     BoqItem,
     ClientData,
+    CostingRevisionSnapshot,
     ContractPaymentLog,
     ContractRevenue,
     ContractRevenueVariation,
@@ -53,9 +55,12 @@ def get_tender_status_options():
     ]
 
 
-def get_latest_revision_summary(tender_number):
+def get_latest_revision_summary(tender_number, company=None):
     boq_items = list(
-        BoqItem.objects.filter(tender_number=tender_number)
+        BoqItem.objects.filter(
+            tender_number=tender_number,
+            **({'company': company} if company else {}),
+        )
         .select_related('costing')
         .prefetch_related('costing__estimate_lines__item', 'costing__labour_lines__item')
     )
@@ -157,9 +162,6 @@ def calculate_boq_item_selling_amount(boq_item):
     cost_percentage = (
         boq_item.freight_custom_duty_percent
         + boq_item.prelims_percent
-        + boq_item.foh_percent
-        + boq_item.commitments_percent
-        + boq_item.contingencies_percent
     )
     unit_cost = base_unit_cost + (base_unit_cost * cost_percentage / Decimal('100'))
     selling_rate = unit_cost * boq_item.markup
@@ -195,6 +197,7 @@ def get_labour_line_amount(labour_lines, category):
 
 
 class MasterListItemSerializer(serializers.ModelSerializer):
+    company = serializers.HiddenField(default=CurrentCompanyDefault())
     itemDescription = serializers.CharField(source='item_description')
     poRefNumber = serializers.SerializerMethodField()
 
@@ -202,6 +205,7 @@ class MasterListItemSerializer(serializers.ModelSerializer):
         model = MasterListItem
         fields = [
             'id',
+            'company',
             'itemDescription',
             'unit',
             'rate',
@@ -216,10 +220,14 @@ class MasterListItemSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         po_ref_number = self.initial_data.get('poRefNumber', '')
+        company = validated_data.get('company')
         po_ref = None
 
         if po_ref_number:
-            po_ref = PurchaseOrder.objects.filter(po_number=po_ref_number).first()
+            po_ref = PurchaseOrder.objects.filter(
+                company=company,
+                po_number=po_ref_number,
+            ).first()
             if not po_ref:
                 raise serializers.ValidationError(
                     {'poRefNumber': 'Purchase order not found.'}
@@ -235,7 +243,10 @@ class MasterListItemSerializer(serializers.ModelSerializer):
 
         if po_ref_number is not None:
             instance.po_ref = (
-                PurchaseOrder.objects.filter(po_number=po_ref_number).first()
+                PurchaseOrder.objects.filter(
+                    company=instance.company,
+                    po_number=po_ref_number,
+                ).first()
                 if po_ref_number
                 else None
             )
@@ -248,6 +259,7 @@ class MasterListItemSerializer(serializers.ModelSerializer):
 
 
 class ClientDataSerializer(serializers.ModelSerializer):
+    company = serializers.HiddenField(default=CurrentCompanyDefault())
     clientName = serializers.CharField(source='client_name')
     supplierTrnNo = serializers.CharField(
         source='supplier_trn_no',
@@ -274,6 +286,7 @@ class ClientDataSerializer(serializers.ModelSerializer):
         model = ClientData
         fields = [
             'id',
+            'company',
             'clientName',
             'supplierTrnNo',
             'country',
@@ -290,6 +303,7 @@ class ClientDataSerializer(serializers.ModelSerializer):
 
 
 class TenderLogSerializer(serializers.ModelSerializer):
+    company = serializers.HiddenField(default=CurrentCompanyDefault())
     tenderNumber = serializers.CharField(source='tender_number')
     quoteRef = serializers.CharField(
         source='quote_ref',
@@ -319,6 +333,17 @@ class TenderLogSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
     )
+    geography = serializers.ChoiceField(
+        choices=TenderLog.GEOGRAPHY_CHOICES,
+        required=False,
+        default=TenderLog.GEO_UAE,
+    )
+    typeOfContract = serializers.ChoiceField(
+        source='type_of_contract',
+        choices=TenderLog.TYPE_OF_CONTRACT_CHOICES,
+        required=False,
+        default=TenderLog.TYPE_REMEASURABLE,
+    )
     tenderDate = serializers.DateField(
         source='tender_date',
         required=False,
@@ -341,6 +366,7 @@ class TenderLogSerializer(serializers.ModelSerializer):
         model = TenderLog
         fields = [
             'id',
+            'company',
             'tenderNumber',
             'quoteRef',
             'revisionNumber',
@@ -350,6 +376,8 @@ class TenderLogSerializer(serializers.ModelSerializer):
             'contactName',
             'projectName',
             'projectLocation',
+            'geography',
+            'typeOfContract',
             'tenderDate',
             'description',
             'sellingAmount',
@@ -369,7 +397,10 @@ class TenderLogSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        latest_revision = get_latest_revision_summary(instance.tender_number)
+        latest_revision = get_latest_revision_summary(
+            instance.tender_number,
+            company=instance.company,
+        )
         selling_amount = Decimal(str(data.get('sellingAmount') or '0'))
 
         data['revisionNumber'] = (
@@ -391,7 +422,12 @@ class TenderLogSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         client_id = validated_data.pop('clientId', None)
-        client = ClientData.objects.filter(id=client_id).first() if client_id else None
+        company = validated_data.get('company')
+        client = (
+            ClientData.objects.filter(company=company, id=client_id).first()
+            if client_id
+            else None
+        )
 
         return TenderLog.objects.create(client=client, **validated_data)
 
@@ -400,7 +436,7 @@ class TenderLogSerializer(serializers.ModelSerializer):
 
         if client_id is not None:
             instance.client = (
-                ClientData.objects.filter(id=client_id).first()
+                ClientData.objects.filter(company=instance.company, id=client_id).first()
                 if client_id
                 else None
             )
@@ -429,6 +465,7 @@ class ContractRevenueVariationSerializer(serializers.ModelSerializer):
 
 
 class ContractRevenueSerializer(serializers.ModelSerializer):
+    company = serializers.HiddenField(default=CurrentCompanyDefault())
     projectNumber = serializers.CharField(source='project_number')
     projectName = serializers.CharField(source='project_name')
     contractValue = serializers.DecimalField(
@@ -518,12 +555,85 @@ class ContractRevenueSerializer(serializers.ModelSerializer):
         decimal_places=2,
         required=False,
     )
+    variationBudgetMaterial = serializers.DecimalField(
+        source='variation_budget_material',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetMachining = serializers.DecimalField(
+        source='variation_budget_machining',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetCoating = serializers.DecimalField(
+        source='variation_budget_coating',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetConsumables = serializers.DecimalField(
+        source='variation_budget_consumables',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetSubcontracts = serializers.DecimalField(
+        source='variation_budget_subcontracts',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetProductionLabour = serializers.DecimalField(
+        source='variation_budget_production_labour',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetFreightCustom = serializers.DecimalField(
+        source='variation_budget_freight_custom',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetInstallationLabour = serializers.DecimalField(
+        source='variation_budget_installation_labour',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetPrelims = serializers.DecimalField(
+        source='variation_budget_prelims',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetFoh = serializers.DecimalField(
+        source='variation_budget_foh',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetCommitments = serializers.DecimalField(
+        source='variation_budget_commitments',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    variationBudgetContingencies = serializers.DecimalField(
+        source='variation_budget_contingencies',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
     variations = ContractRevenueVariationSerializer(many=True, required=False)
 
     class Meta:
         model = ContractRevenue
         fields = [
             'id',
+            'company',
             'projectNumber',
             'projectName',
             'contractValue',
@@ -541,6 +651,18 @@ class ContractRevenueSerializer(serializers.ModelSerializer):
             'budgetFoh',
             'budgetCommitments',
             'budgetContingencies',
+            'variationBudgetMaterial',
+            'variationBudgetMachining',
+            'variationBudgetCoating',
+            'variationBudgetConsumables',
+            'variationBudgetSubcontracts',
+            'variationBudgetProductionLabour',
+            'variationBudgetFreightCustom',
+            'variationBudgetInstallationLabour',
+            'variationBudgetPrelims',
+            'variationBudgetFoh',
+            'variationBudgetCommitments',
+            'variationBudgetContingencies',
             'variations',
             'created_at',
             'updated_at',
@@ -579,6 +701,7 @@ class ContractRevenueSerializer(serializers.ModelSerializer):
 
 
 class ContractVariationLogSerializer(serializers.ModelSerializer):
+    company = serializers.HiddenField(default=CurrentCompanyDefault())
     projectNumber = serializers.CharField(source='project_number')
     projectName = serializers.CharField(source='project_name')
     rfvNumber = serializers.CharField(
@@ -633,6 +756,7 @@ class ContractVariationLogSerializer(serializers.ModelSerializer):
         model = ContractVariationLog
         fields = [
             'id',
+            'company',
             'projectNumber',
             'projectName',
             'rfvNumber',
@@ -653,7 +777,28 @@ class ContractVariationLogSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
+def calculate_contract_payment_net(
+    advance,
+    recovery_advance,
+    gross_amount,
+    retention,
+    release_retention,
+):
+    return (
+        Decimal(advance or 0)
+        - Decimal(recovery_advance or 0)
+        + Decimal(gross_amount or 0)
+        - Decimal(retention or 0)
+        + Decimal(release_retention or 0)
+    )
+
+
+def calculate_vat_amount(net_amount, vat_percent):
+    return Decimal(net_amount or 0) * Decimal(vat_percent or 0) / Decimal('100')
+
+
 class ContractPaymentLogSerializer(serializers.ModelSerializer):
+    company = serializers.HiddenField(default=CurrentCompanyDefault())
     projectNumber = serializers.CharField(source='project_number')
     projectName = serializers.CharField(source='project_name')
     submittedDate = serializers.DateField(
@@ -708,6 +853,12 @@ class ContractPaymentLogSerializer(serializers.ModelSerializer):
         decimal_places=2,
         required=False,
     )
+    submittedVatAmount = serializers.DecimalField(
+        source='submitted_vat_amount',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
     netSubmittedIncVat = serializers.DecimalField(
         source='net_submitted_inc_vat',
         max_digits=16,
@@ -756,6 +907,12 @@ class ContractPaymentLogSerializer(serializers.ModelSerializer):
         decimal_places=2,
         required=False,
     )
+    approvedVatAmount = serializers.DecimalField(
+        source='approved_vat_amount',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
     netApprovedIncVat = serializers.DecimalField(
         source='net_approved_inc_vat',
         max_digits=16,
@@ -772,6 +929,12 @@ class ContractPaymentLogSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    paidAmount = serializers.DecimalField(
+        source='paid_amount',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
     forecastDate = serializers.DateField(
         source='forecast_date',
         required=False,
@@ -782,6 +945,7 @@ class ContractPaymentLogSerializer(serializers.ModelSerializer):
         model = ContractPaymentLog
         fields = [
             'id',
+            'company',
             'projectNumber',
             'projectName',
             'sn',
@@ -794,6 +958,7 @@ class ContractPaymentLogSerializer(serializers.ModelSerializer):
             'submittedReleaseRetention',
             'netSubmittedAmount',
             'submittedVat',
+            'submittedVatAmount',
             'netSubmittedIncVat',
             'approvedAdvance',
             'approvedRecoveryAdvance',
@@ -802,17 +967,54 @@ class ContractPaymentLogSerializer(serializers.ModelSerializer):
             'approvedReleaseRetention',
             'netApprovedAmount',
             'approvedVat',
+            'approvedVatAmount',
             'netApprovedIncVat',
             'dueDate',
             'paidDate',
+            'paidAmount',
             'forecastDate',
             'created_at',
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        submitted_net = calculate_contract_payment_net(
+            attrs.get('submitted_advance'),
+            attrs.get('submitted_recovery_advance'),
+            attrs.get('gross_submitted_amount'),
+            attrs.get('submitted_retention'),
+            attrs.get('submitted_release_retention'),
+        )
+        submitted_vat_amount = calculate_vat_amount(
+            submitted_net,
+            attrs.get('submitted_vat'),
+        )
+        approved_net = calculate_contract_payment_net(
+            attrs.get('approved_advance'),
+            attrs.get('approved_recovery_advance'),
+            attrs.get('gross_approved_amount'),
+            attrs.get('approved_retention'),
+            attrs.get('approved_release_retention'),
+        )
+        approved_vat_amount = calculate_vat_amount(
+            approved_net,
+            attrs.get('approved_vat'),
+        )
+
+        attrs['net_submitted_amount'] = submitted_net
+        attrs['submitted_vat_amount'] = submitted_vat_amount
+        attrs['net_submitted_inc_vat'] = submitted_net + submitted_vat_amount
+        attrs['net_approved_amount'] = approved_net
+        attrs['approved_vat_amount'] = approved_vat_amount
+        attrs['net_approved_inc_vat'] = approved_net + approved_vat_amount
+
+        return attrs
+
 
 class BoqItemSerializer(serializers.ModelSerializer):
+    company = serializers.HiddenField(default=CurrentCompanyDefault())
     id = serializers.IntegerField(required=False)
     tenderNumber = serializers.CharField(
         source='tender_number',
@@ -835,6 +1037,7 @@ class BoqItemSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
     )
+    package = serializers.CharField(required=False, allow_blank=True)
     freightCustomDutyPercent = serializers.DecimalField(
         source='freight_custom_duty_percent',
         max_digits=8,
@@ -875,11 +1078,13 @@ class BoqItemSerializer(serializers.ModelSerializer):
         model = BoqItem
         fields = [
             'id',
+            'company',
             'sn',
             'tenderNumber',
             'revisionNumber',
             'revisionDate',
             'clientsBoq',
+            'package',
             'description',
             'quantity',
             'unit',
@@ -893,6 +1098,66 @@ class BoqItemSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['created_at', 'updated_at']
+
+
+class CostingRevisionSnapshotSerializer(serializers.ModelSerializer):
+    company = serializers.HiddenField(default=CurrentCompanyDefault())
+
+    class Meta:
+        model = CostingRevisionSnapshot
+        fields = [
+            'id',
+            'company',
+            'tender_number',
+            'project_name',
+            'revision_number',
+            'status',
+            'submitted_by',
+            'approved_by',
+            'submitted_at',
+            'approved_at',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'company',
+            'status',
+            'submitted_by',
+            'approved_by',
+            'submitted_at',
+            'approved_at',
+            'created_at',
+            'updated_at',
+        ]
+
+
+class CostingRevisionSnapshotEntrySerializer(serializers.Serializer):
+    tender_number = serializers.CharField(max_length=100)
+    project_name = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        default='',
+    )
+    revision_number = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        default='',
+    )
+
+    def validate(self, attrs):
+        attrs['tender_number'] = (attrs.get('tender_number') or '').strip()
+        attrs['project_name'] = (attrs.get('project_name') or '').strip()
+        attrs['revision_number'] = (attrs.get('revision_number') or '').strip()
+
+        if not attrs['tender_number']:
+            raise serializers.ValidationError(
+                {'tender_number': 'Tender # is required.'}
+            )
+
+        return attrs
 
 
 def serialize_tender_costing(costing):
@@ -963,6 +1228,7 @@ def serialize_stage_labour_line(lines, stage):
 
 def save_tender_costing(boq_item, data):
     costing, _ = TenderCosting.objects.get_or_create(boq_item=boq_item)
+    company = boq_item.company
 
     save_estimate_lines(costing, EstimateCostLine.MATERIAL, data.get('material', []))
     save_estimate_lines(costing, EstimateCostLine.MACHINING, data.get('machining', []))
@@ -977,12 +1243,14 @@ def save_tender_costing(boq_item, data):
         costing,
         LabourCostLine.PRODUCTION_LABOUR,
         data.get('productionLabour', {}),
+        company=company,
     )
     save_labour_lines(
         costing,
         LabourCostLine.INSTALLATION_LABOUR,
         data.get('installationLabour', {}),
         include_stages=False,
+        company=company,
     )
 
     return costing
@@ -1013,24 +1281,36 @@ def save_estimate_lines(costing, category, data):
         )
 
 
-def save_labour_lines(costing, category, data, include_stages=True):
+def save_labour_lines(costing, category, data, include_stages=True, company=None):
     LabourCostLine.objects.filter(
         costing=costing,
         category=category,
     ).delete()
 
     if not include_stages:
-        save_labour_stage_lines(costing, category, 'Installation', data or {})
+        save_labour_stage_lines(
+            costing,
+            category,
+            'Installation',
+            data or {},
+            company=company,
+        )
         return
 
     for stage in LABOUR_STAGE_NAMES:
-        save_labour_stage_lines(costing, category, stage, data.get(stage, {}))
+        save_labour_stage_lines(
+            costing,
+            category,
+            stage,
+            data.get(stage, {}),
+            company=company,
+        )
 
 
-def save_labour_stage_lines(costing, category, stage, data):
+def save_labour_stage_lines(costing, category, stage, data, company=None):
     for role, field_name in LABOUR_ROLE_FIELD_MAP.items():
         hours = to_decimal(data.get(field_name))
-        item = get_labour_master_item(role)
+        item = get_labour_master_item(role, company=company)
 
         if hours == Decimal('0.00') and not item:
             continue
@@ -1052,11 +1332,12 @@ def get_labour_hours(lines, stage, role):
     return line.hours if line else Decimal('0.00')
 
 
-def get_labour_master_item(role):
+def get_labour_master_item(role, company=None):
     for item_description in LABOUR_ROLE_NAME_MAP.get(role, []):
-        item = MasterListItem.objects.filter(
-            item_description__iexact=item_description
-        ).first()
+        filters = {'item_description__iexact': item_description}
+        if company:
+            filters['company'] = company
+        item = MasterListItem.objects.filter(**filters).first()
         if item:
             return item
 

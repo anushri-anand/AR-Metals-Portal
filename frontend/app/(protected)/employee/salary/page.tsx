@@ -7,6 +7,10 @@ export default function SalaryPage() {
       links={[
         { label: 'Payroll', href: '/employee/salary/payroll' },
         { label: 'Advance', href: '/employee/salary/advance' },
+        {
+          label: 'Actual Incurred Cost',
+          href: '/employee/salary/actual-incurred-cost',
+        },
       ]}
     />
   )

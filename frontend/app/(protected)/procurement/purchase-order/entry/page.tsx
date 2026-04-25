@@ -1,5 +1,5 @@
-import PurchaseOrderEntryForm from './purchase-order-entry-form'
+import { redirect } from 'next/navigation'
 
 export default function PurchaseOrderEntryPage() {
-  return <PurchaseOrderEntryForm />
+  redirect('/procurement/purchase-order/project/entry')
 }

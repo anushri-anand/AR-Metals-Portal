@@ -25,6 +25,26 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.app-shell-content .text-slate-400,
+.app-shell-content .text-slate-500,
+.app-shell-content .text-slate-600,
+.app-shell-content .text-slate-700,
+.app-shell-content .text-slate-800,
+.app-shell-content .text-gray-400,
+.app-shell-content .text-gray-500,
+.app-shell-content .text-gray-600,
+.app-shell-content .text-gray-700,
+.app-shell-content .text-gray-800 {
+  color: #000000;
+}
+
+.app-shell-content input,
+.app-shell-content select,
+.app-shell-content textarea,
+.app-shell-content ::placeholder {
+  color: #000000;
+}
+
 input,
 select,
 textarea {
@@ -34,6 +54,17 @@ textarea {
 input::placeholder,
 textarea::placeholder {
   color: #0f172a;
+}
+
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 table {

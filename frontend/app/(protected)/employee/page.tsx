@@ -8,6 +8,7 @@ export default function EmployeePage() {
         { label: 'Personal Details', href: '/employee/personal-details' },
         { label: 'Time Sheet', href: '/employee/time-sheet' },
         { label: 'Salary', href: '/employee/salary' },
+        { label: 'Associated Cost', href: '/employee/associated-cost' },
       ]}
     />
   )

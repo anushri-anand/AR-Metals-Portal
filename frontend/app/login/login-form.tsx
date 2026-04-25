@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchAPI } from '@/lib/api'
+import { clearStoredCompany } from '@/lib/company'
 
 type LoginResponse = {
   access: string
@@ -33,6 +34,7 @@ export default function LoginForm() {
 
       localStorage.setItem('access_token', data.access)
       localStorage.setItem('refresh_token', data.refresh)
+      clearStoredCompany()
 
       router.replace('/dashboard')
       router.refresh()

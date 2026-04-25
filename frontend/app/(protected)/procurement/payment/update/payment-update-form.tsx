@@ -15,6 +15,8 @@ type ApiPhase = {
   paid_date: string | null
   invoice_no: string
   invoice_date: string | null
+  gl_no: string
+  gl_date: string | null
 }
 
 type PaymentRecord = {
@@ -41,6 +43,8 @@ type Phase = {
   paidDate: string
   invoiceNo: string
   invoiceDate: string
+  glNo: string
+  glDate: string
 }
 
 type FormState = {
@@ -122,6 +126,8 @@ export default function PaymentUpdateForm() {
         paidDate: phase.paid_date || '',
         invoiceNo: phase.invoice_no || '',
         invoiceDate: phase.invoice_date || '',
+        glNo: phase.gl_no || '',
+        glDate: phase.gl_date || '',
       })),
     })
   }
@@ -149,7 +155,9 @@ export default function PaymentUpdateForm() {
       | 'vat'
       | 'paidDate'
       | 'invoiceNo'
-      | 'invoiceDate',
+      | 'invoiceDate'
+      | 'glNo'
+      | 'glDate',
     value: string
   ) {
     setForm((prev) => ({
@@ -184,6 +192,8 @@ export default function PaymentUpdateForm() {
             paid_date: phase.paidDate || null,
             invoice_no: phase.invoiceNo,
             invoice_date: phase.invoiceDate || null,
+            gl_no: phase.glNo,
+            gl_date: phase.glDate || null,
           })),
         }),
       })
@@ -316,7 +326,7 @@ export default function PaymentUpdateForm() {
                   </h2>
 
                   <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-                    <ReadOnlyField label="Amount" value={phase.amount} />
+                    <ReadOnlyField label="Payable Amount" value={phase.amount} />
                     <ReadOnlyField label="Due Date" value={phase.dueDate} />
 
                     <Field label="Forecast Date">
@@ -390,15 +400,44 @@ export default function PaymentUpdateForm() {
                     </Field>
 
                     <Field label="Invoice Date">
-                      <input
-                        type="date"
-                        value={phase.invoiceDate}
+                        <input
+                          type="date"
+                          value={phase.invoiceDate}
                         onChange={(e) =>
                           handlePhaseChange(index, 'invoiceDate', e.target.value)
+                        }
+                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                        />
+                      </Field>
+
+                      <Field label="GL No.">
+                        <input
+                          value={phase.glNo}
+                          onChange={(e) =>
+                            handlePhaseChange(index, 'glNo', e.target.value)
+                          }
+                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                          placeholder="Enter GL number"
+                        />
+                      </Field>
+
+                      <Field label="GL Date">
+                        <input
+                          type="date"
+                        value={phase.glDate}
+                        onChange={(e) =>
+                          handlePhaseChange(index, 'glDate', e.target.value)
                         }
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
                       />
                     </Field>
+
+                    <ReadOnlyField
+                      label="Balance to be Paid"
+                      value={formatMoney(
+                        Number(phase.amount || 0) - Number(phase.paidIncVat || 0)
+                      )}
+                    />
                   </div>
                 </div>
               ))}
@@ -452,5 +491,8 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
 }
 
 function formatMoney(value: number) {
-  return value.toFixed(2)
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 }

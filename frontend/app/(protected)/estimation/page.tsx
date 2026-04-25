@@ -9,6 +9,8 @@ export default function EstimationPage() {
         { label: 'Tender Log', href: '/estimation/tender-log' },
         { label: 'Master List', href: '/estimation/master-list' },
         { label: 'Costing', href: '/estimation/costing' },
+        { label: 'Estimated Summary', href: '/estimation/estimated-summary' },
+        { label: 'BOMAL', href: '/estimation/bomal' },
       ]}
     />
   )

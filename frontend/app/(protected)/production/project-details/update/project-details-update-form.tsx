@@ -5,6 +5,7 @@ import { fetchAPI } from '@/lib/api'
 
 type ProjectItem = {
   id: number
+  package: string
   item_name: string
   quantity: string
   unit: string
@@ -15,6 +16,7 @@ type ProjectDetail = {
   id: number
   project_name: string
   project_number: string
+  contract_po_ref?: string
   items: ProjectItem[]
 }
 
@@ -164,6 +166,17 @@ export default function ProjectDetailsUpdateForm() {
               ))}
             </select>
           </Field>
+
+          <Field label="Contract / PO Ref">
+            <input
+              value={
+                projects.find((project) => project.project_number === selectedProjectNumber)
+                  ?.contract_po_ref || ''
+              }
+              readOnly
+              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900"
+            />
+          </Field>
         </div>
 
         {loading ? (
@@ -172,9 +185,10 @@ export default function ProjectDetailsUpdateForm() {
           <p className="mt-8 text-slate-700">Select a project to view items.</p>
         ) : (
           <div className="mt-8 max-h-[70vh] w-full max-w-full overflow-auto">
-            <table className="min-w-[720px] border-collapse">
+            <table className="min-w-[860px] border-collapse">
               <thead className="sticky top-0 z-10 bg-white">
                 <tr className="border-b border-slate-300 text-left text-slate-900">
+                  <th className="py-3 pr-4 font-semibold">Package</th>
                   <th className="py-3 pr-4 font-semibold">Item</th>
                   <th className="py-3 pr-4 font-semibold">Qty</th>
                   <th className="py-3 pr-4 font-semibold">Unit</th>
@@ -185,11 +199,12 @@ export default function ProjectDetailsUpdateForm() {
               <tbody>
                 {items.map((item, index) => (
                   <tr key={item.id} className="border-b border-slate-100">
+                    <td className="py-3 pr-4 text-slate-800">{item.package || '-'}</td>
                     <td className="py-3 pr-4 text-slate-800">{item.item_name}</td>
                     <td className="py-3 pr-4 text-slate-800">
                       <input
                         type="number"
-                        step="0.01"
+                        step="any"
                         value={item.quantity}
                         onChange={(e) =>
                           handleItemChange(index, 'quantity', e.target.value)

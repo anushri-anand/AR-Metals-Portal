@@ -4,14 +4,37 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import {
   ClientData,
+  ContractType,
+  contractTypeOptions,
+  geographyOptions,
+  GeographyType,
   TenderLog,
   createTenderLog,
   getClientData,
   getTenderLogs,
   tenderStatusOptions,
 } from '@/lib/estimation-storage'
+import { findNextDocumentNumber } from '@/lib/document-numbering'
 
-const initialForm = {
+type TenderLogEntryForm = {
+  tenderNumber: string
+  quoteRef: string
+  revisionNumber: string
+  revisionDate: string
+  clientId: string
+  projectName: string
+  projectLocation: string
+  geography: GeographyType
+  typeOfContract: ContractType
+  description: string
+  sellingAmount: string
+  tenderDate: string
+  submissionDate: string
+  status: string
+  remarks: string
+}
+
+const initialForm: TenderLogEntryForm = {
   tenderNumber: '',
   quoteRef: '',
   revisionNumber: 'R0',
@@ -19,6 +42,8 @@ const initialForm = {
   clientId: '',
   projectName: '',
   projectLocation: '',
+  geography: 'UAE',
+  typeOfContract: 'Re-measurable',
   description: '',
   sellingAmount: '',
   tenderDate: '',
@@ -44,9 +69,12 @@ export default function TenderLogEntryClient() {
 
         setClients(savedClients)
         setTenders(savedTenders)
+        const existingTenderNumbers = savedTenders.map((tender) => tender.tenderNumber)
+        const existingQuoteRefs = savedTenders.map((tender) => tender.quoteRef)
         setForm((prev) => ({
           ...prev,
-          tenderNumber: getNextTenderNumber(savedTenders),
+          tenderNumber: findNextDocumentNumber(existingTenderNumbers, 'TEN'),
+          quoteRef: findNextDocumentNumber(existingQuoteRefs, 'QT'),
         }))
       } catch (err) {
         setError(
@@ -92,6 +120,8 @@ export default function TenderLogEntryClient() {
         clientId: form.clientId ? Number(form.clientId) : null,
         projectName: form.projectName.trim(),
         projectLocation: form.projectLocation.trim(),
+        geography: form.geography,
+        typeOfContract: form.typeOfContract,
         description: form.description.trim(),
         sellingAmount: Number(form.sellingAmount || 0),
         tenderDate: form.tenderDate || null,
@@ -100,11 +130,14 @@ export default function TenderLogEntryClient() {
         remarks: form.remarks.trim(),
       })
       const nextTenders = [savedTender, ...tenders]
+      const existingTenderNumbers = nextTenders.map((tender) => tender.tenderNumber)
+      const existingQuoteRefs = nextTenders.map((tender) => tender.quoteRef)
 
       setTenders(nextTenders)
       setForm({
         ...initialForm,
-        tenderNumber: getNextTenderNumber(nextTenders),
+        tenderNumber: findNextDocumentNumber(existingTenderNumbers, 'TEN'),
+        quoteRef: findNextDocumentNumber(existingQuoteRefs, 'QT'),
       })
       setMessage('Tender log saved.')
     } catch (err) {
@@ -164,8 +197,7 @@ export default function TenderLogEntryClient() {
               name="revisionNumber"
               value={form.revisionNumber}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
-              readOnly
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
             />
           </Field>
 
@@ -226,6 +258,37 @@ export default function TenderLogEntryClient() {
               placeholder="Enter project location"
               required
             />
+          </Field>
+
+          <Field label="Geography">
+            <select
+              name="geography"
+              value={form.geography}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              required
+            >
+              {geographyOptions.map((geography) => (
+                <option key={geography} value={geography}>
+                  {geography}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Type of Contract">
+            <select
+              name="typeOfContract"
+              value={form.typeOfContract}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+            >
+              {contractTypeOptions.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
           </Field>
 
           <Field label="Quote Amount">
@@ -315,18 +378,6 @@ export default function TenderLogEntryClient() {
 
 function getSelectedClient(clients: ClientData[], clientId: string) {
   return clients.find((client) => String(client.id) === String(clientId))
-}
-
-function getNextTenderNumber(tenders: TenderLog[]) {
-  const numericTenderNumbers = tenders
-    .map((tender) => Number(tender.tenderNumber))
-    .filter((value) => Number.isInteger(value) && value > 0)
-
-  if (numericTenderNumbers.length === 0) {
-    return String(tenders.length + 1)
-  }
-
-  return String(Math.max(...numericTenderNumbers) + 1)
 }
 
 function Field({

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany, isCompanyScopedPath } from '@/lib/company'
 
 export default function ProtectedClient({
   children,
@@ -17,6 +18,11 @@ export default function ProtectedClient({
     async function checkAuth() {
       try {
         await fetchAPI('/accounts/me/')
+
+        if (isCompanyScopedPath(pathname) && !getStoredCompany()) {
+          router.replace('/dashboard')
+          return
+        }
       } catch {
         router.replace('/login')
         return

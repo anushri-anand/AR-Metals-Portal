@@ -8,6 +8,7 @@ export default function PurchaseOrderPage() {
         { label: 'Project', href: '/procurement/purchase-order/project' },
         { label: 'Asset', href: '/procurement/purchase-order/asset' },
         { label: 'Inventory', href: '/procurement/purchase-order/inventory' },
+        { label: 'Petty Cash', href: '/procurement/purchase-order/petty-cash' },
       ]}
     />
   )

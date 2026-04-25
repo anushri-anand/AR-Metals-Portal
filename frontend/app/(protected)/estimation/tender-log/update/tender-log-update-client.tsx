@@ -2,16 +2,35 @@
 
 import { useEffect, useState } from 'react'
 import {
+  ContractType,
+  contractTypeOptions,
+  geographyOptions,
+  GeographyType,
   TenderLog,
   getTenderLogs,
   tenderStatusOptions,
   updateTenderLog,
 } from '@/lib/estimation-storage'
 
-const initialForm = {
+type TenderLogUpdateForm = {
+  quoteRef: string
+  revisionNumber: string
+  revisionDate: string
+  geography: GeographyType
+  typeOfContract: ContractType
+  description: string
+  sellingAmount: string
+  tenderDate: string
+  status: string
+  remarks: string
+}
+
+const initialForm: TenderLogUpdateForm = {
   quoteRef: '',
   revisionNumber: '',
   revisionDate: '',
+  geography: 'UAE',
+  typeOfContract: 'Re-measurable',
   description: '',
   sellingAmount: '',
   tenderDate: '',
@@ -89,6 +108,8 @@ export default function TenderLogUpdateClient() {
         quoteRef: form.quoteRef.trim(),
         revisionNumber: form.revisionNumber.trim(),
         revisionDate: form.revisionDate || null,
+        geography: form.geography,
+        typeOfContract: form.typeOfContract,
         description: form.description.trim(),
         sellingAmount: Number(form.sellingAmount || 0),
         tenderDate: form.tenderDate || null,
@@ -119,7 +140,6 @@ export default function TenderLogUpdateClient() {
           Select a submitted tender and update the fields that were optional
           during entry.
         </p>
-        {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       </div>
 
@@ -151,6 +171,20 @@ export default function TenderLogUpdateClient() {
             label="Project Location"
             value={selectedTender?.projectLocation}
           />
+          <Field label="Geography">
+            <select
+              name="geography"
+              value={form.geography}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+            >
+              {geographyOptions.map((geography) => (
+                <option key={geography} value={geography}>
+                  {geography}
+                </option>
+              ))}
+            </select>
+          </Field>
           <ReadOnlyField
             label="Tender Submission Date"
             value={selectedTender?.submissionDate}
@@ -194,6 +228,21 @@ export default function TenderLogUpdateClient() {
               onChange={handleChange}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
             />
+          </Field>
+
+          <Field label="Type of Contract">
+            <select
+              name="typeOfContract"
+              value={form.typeOfContract}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+            >
+              {contractTypeOptions.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
           </Field>
 
           <Field label="Quote Amount">
@@ -244,13 +293,16 @@ export default function TenderLogUpdateClient() {
           />
         </Field>
 
-        <button
-          type="submit"
-          disabled={saving || !selectedTender}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {saving ? 'Updating...' : 'Update Tender'}
-        </button>
+        <div className="space-y-3">
+          <button
+            type="submit"
+            disabled={saving || !selectedTender}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? 'Updating...' : 'Update Tender'}
+          </button>
+          {message && <p className="text-sm text-green-700">{message}</p>}
+        </div>
       </form>
     </div>
   )
@@ -272,6 +324,8 @@ function createForm(tender: TenderLog) {
     quoteRef: tender.quoteRef || '',
     revisionNumber: tender.revisionNumber || '',
     revisionDate: tender.revisionDate || '',
+    geography: tender.geography || 'UAE',
+    typeOfContract: tender.typeOfContract || 'Re-measurable',
     description: tender.description || '',
     sellingAmount: String(tender.sellingAmount || ''),
     tenderDate: tender.tenderDate || '',

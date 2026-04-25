@@ -2,11 +2,19 @@
 
 import { useEffect, useState } from 'react'
 import ProjectSelectFields from '@/components/project-select-fields'
+import { fetchAPI } from '@/lib/api'
 import {
+  BoqItem,
   ContractRevenue,
+  MasterListItem,
+  TenderCosting,
+  calculateCostSummary,
   createContractRevenue,
   formatMoney,
+  getBoqItems,
   getContractRevenues,
+  getMasterListItems,
+  getTenderCostings,
 } from '@/lib/estimation-storage'
 
 const budgetFields = [
@@ -26,17 +34,43 @@ const budgetFields = [
 
 type BudgetKey = (typeof budgetFields)[number]['key']
 
+const variationBudgetFields = [
+  { key: 'variationBudgetMaterial', label: 'Material' },
+  { key: 'variationBudgetMachining', label: 'Machining' },
+  { key: 'variationBudgetCoating', label: 'Coating' },
+  { key: 'variationBudgetConsumables', label: 'Consumables' },
+  { key: 'variationBudgetSubcontracts', label: 'Subcontracts' },
+  { key: 'variationBudgetProductionLabour', label: 'Production Labour' },
+  { key: 'variationBudgetFreightCustom', label: 'Freight & Custom' },
+  { key: 'variationBudgetInstallationLabour', label: 'Installation Labour' },
+  { key: 'variationBudgetPrelims', label: 'Prelims' },
+  { key: 'variationBudgetFoh', label: 'FOH' },
+  { key: 'variationBudgetCommitments', label: 'Commitments' },
+  { key: 'variationBudgetContingencies', label: 'Contingencies' },
+] as const
+
+type VariationBudgetKey = (typeof variationBudgetFields)[number]['key']
+
 type RevenueForm = {
   projectNumber: string
   projectName: string
   contractValue: string
   startDate: string
   completionDate: string
-} & Record<BudgetKey, string>
+} & Record<BudgetKey | VariationBudgetKey, string>
 
 type VariationRow = {
   variationNumber: string
   amount: string
+}
+
+type ProjectOption = {
+  id: number
+  project_name: string
+  project_number: string
+  tender_number: string
+  revision_number: string
+  contract_po_ref?: string
 }
 
 const initialForm: RevenueForm = {
@@ -57,20 +91,55 @@ const initialForm: RevenueForm = {
   budgetFoh: '',
   budgetCommitments: '',
   budgetContingencies: '',
+  variationBudgetMaterial: '',
+  variationBudgetMachining: '',
+  variationBudgetCoating: '',
+  variationBudgetConsumables: '',
+  variationBudgetSubcontracts: '',
+  variationBudgetProductionLabour: '',
+  variationBudgetFreightCustom: '',
+  variationBudgetInstallationLabour: '',
+  variationBudgetPrelims: '',
+  variationBudgetFoh: '',
+  variationBudgetCommitments: '',
+  variationBudgetContingencies: '',
 }
 
 export default function ContractRevenueClient() {
   const [form, setForm] = useState<RevenueForm>(initialForm)
   const [variations, setVariations] = useState<VariationRow[]>([])
   const [revenues, setRevenues] = useState<ContractRevenue[]>([])
+  const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
+  const [boqItems, setBoqItems] = useState<BoqItem[]>([])
+  const [costings, setCostings] = useState<TenderCosting[]>([])
+  const [masterItems, setMasterItems] = useState<MasterListItem[]>([])
+  const [budgetMessage, setBudgetMessage] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    async function loadRevenues() {
+    async function loadData() {
       try {
-        setRevenues(await getContractRevenues())
+        const [
+          savedRevenues,
+          savedProjects,
+          savedBoqItems,
+          savedCostings,
+          savedMasterItems,
+        ] = await Promise.all([
+          getContractRevenues(),
+          fetchAPI('/production/project-details/options/'),
+          getBoqItems(),
+          getTenderCostings(),
+          getMasterListItems(),
+        ])
+
+        setRevenues(savedRevenues)
+        setProjectOptions(savedProjects)
+        setBoqItems(savedBoqItems)
+        setCostings(savedCostings)
+        setMasterItems(savedMasterItems)
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'Failed to load contract revenue.'
@@ -78,7 +147,7 @@ export default function ContractRevenueClient() {
       }
     }
 
-    loadRevenues()
+    loadData()
   }, [])
 
   const contractValue = toNumber(form.contractValue)
@@ -87,6 +156,12 @@ export default function ContractRevenueClient() {
     0
   )
   const revisedContract = contractValue + agreedVariation
+  const selectedProjectOption =
+    projectOptions.find(
+      (project) =>
+        project.project_number === form.projectNumber ||
+        project.project_name === form.projectName
+    ) || null
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target
@@ -100,11 +175,23 @@ export default function ContractRevenueClient() {
   function handleProjectChange(value: {
     projectNumber: string
     projectName: string
+    tenderNumber?: string
+    revisionNumber?: string
   }) {
+    const budget = getRevenueBudgetForProject(
+      value,
+      projectOptions,
+      boqItems,
+      costings,
+      masterItems
+    )
+
     setForm((prev) => ({
       ...prev,
       ...value,
+      ...(budget?.values || {}),
     }))
+    setBudgetMessage(budget?.message || '')
   }
 
   function handleAddVariation() {
@@ -159,6 +246,22 @@ export default function ContractRevenueClient() {
         budgetFoh: toNumber(form.budgetFoh),
         budgetCommitments: toNumber(form.budgetCommitments),
         budgetContingencies: toNumber(form.budgetContingencies),
+        variationBudgetMaterial: toNumber(form.variationBudgetMaterial),
+        variationBudgetMachining: toNumber(form.variationBudgetMachining),
+        variationBudgetCoating: toNumber(form.variationBudgetCoating),
+        variationBudgetConsumables: toNumber(form.variationBudgetConsumables),
+        variationBudgetSubcontracts: toNumber(form.variationBudgetSubcontracts),
+        variationBudgetProductionLabour: toNumber(
+          form.variationBudgetProductionLabour
+        ),
+        variationBudgetFreightCustom: toNumber(form.variationBudgetFreightCustom),
+        variationBudgetInstallationLabour: toNumber(
+          form.variationBudgetInstallationLabour
+        ),
+        variationBudgetPrelims: toNumber(form.variationBudgetPrelims),
+        variationBudgetFoh: toNumber(form.variationBudgetFoh),
+        variationBudgetCommitments: toNumber(form.variationBudgetCommitments),
+        variationBudgetContingencies: toNumber(form.variationBudgetContingencies),
         variations: variations.map((variation, index) => ({
           variationNumber: variation.variationNumber || `VO# ${index + 1}`,
           amount: toNumber(variation.amount),
@@ -186,8 +289,10 @@ export default function ContractRevenueClient() {
           Save contract value, contract dates, budget split, and agreed
           variations for each project.
         </p>
-        {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+        {budgetMessage && (
+          <p className="mt-3 text-sm text-slate-600">{budgetMessage}</p>
+        )}
       </div>
 
       <form
@@ -200,6 +305,15 @@ export default function ContractRevenueClient() {
             projectName={form.projectName}
             onChange={handleProjectChange}
           />
+
+          <Field label="Contract Ref">
+            <input
+              value={selectedProjectOption?.contract_po_ref || ''}
+              readOnly
+              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900"
+              placeholder="Will show after project is selected"
+            />
+          </Field>
 
           <Field label="Contract Value">
             <input
@@ -314,6 +428,25 @@ export default function ContractRevenueClient() {
           )}
         </div>
 
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">Variation Budget</h2>
+          <div className="mt-4 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+            {variationBudgetFields.map((field) => (
+              <Field key={field.key} label={field.label}>
+                <input
+                  type="number"
+                  name={field.key}
+                  value={form[field.key]}
+                  onChange={handleChange}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                  min="0"
+                  step="0.01"
+                />
+              </Field>
+            ))}
+          </div>
+        </div>
+
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
           <h2 className="text-lg font-semibold text-slate-900">
             Summary - Contract Value
@@ -325,13 +458,16 @@ export default function ContractRevenueClient() {
           </div>
         </div>
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {saving ? 'Saving...' : 'Save Revenue'}
-        </button>
+        <div className="space-y-3">
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? 'Saving...' : 'Save Revenue'}
+          </button>
+          {message && <p className="text-sm text-green-700">{message}</p>}
+        </div>
       </form>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -346,6 +482,7 @@ export default function ContractRevenueClient() {
               <tr>
                 <th className="px-4 py-3 font-semibold">Project #</th>
                 <th className="px-4 py-3 font-semibold">Project Name</th>
+                <th className="px-4 py-3 font-semibold">Contract Ref</th>
                 <th className="px-4 py-3 font-semibold">Contract Value</th>
                 <th className="px-4 py-3 font-semibold">Agreed Variation</th>
                 <th className="px-4 py-3 font-semibold">Revised Contract</th>
@@ -359,6 +496,12 @@ export default function ContractRevenueClient() {
                   (total, variation) => total + variation.amount,
                   0
                 )
+                const revenueProjectOption =
+                  projectOptions.find(
+                    (project) =>
+                      project.project_number === revenue.projectNumber ||
+                      project.project_name === revenue.projectName
+                  ) || null
 
                 return (
                   <tr key={revenue.id}>
@@ -367,6 +510,9 @@ export default function ContractRevenueClient() {
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                       {revenue.projectName}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {revenueProjectOption?.contract_po_ref || '-'}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                       {formatMoney(revenue.contractValue)}
@@ -430,6 +576,158 @@ function SummaryValue({ label, value }: { label: string; value: number }) {
 
 function formatDate(value: string | null) {
   return value || '-'
+}
+
+function getRevenueBudgetForProject(
+  value: {
+    projectNumber: string
+    projectName: string
+    tenderNumber?: string
+    revisionNumber?: string
+  },
+  projects: ProjectOption[],
+  boqItems: BoqItem[],
+  costings: TenderCosting[],
+  masterItems: MasterListItem[]
+) {
+  const project = projects.find(
+    (item) =>
+      item.project_number === value.projectNumber ||
+      item.project_name === value.projectName
+  )
+  const tenderNumber = value.tenderNumber || project?.tender_number || ''
+  const projectRevisionNumber =
+    value.revisionNumber || project?.revision_number || ''
+
+  if (!tenderNumber) {
+    return {
+      values: {},
+      message: 'No tender is linked to this project yet.',
+    }
+  }
+
+  const tenderRows = boqItems.filter(
+    (item) => item.tenderNumber === tenderNumber
+  )
+
+  if (tenderRows.length === 0) {
+    return {
+      values: {},
+      message: `No BOQ rows found for tender ${tenderNumber}.`,
+    }
+  }
+
+  const latestRevision = projectRevisionNumber || getLatestRevision(tenderRows)
+  const rows = tenderRows.filter(
+    (item) => (item.revisionNumber || '') === latestRevision
+  )
+  const totals = createEmptyRevenueBudgetTotals()
+  let costedRowCount = 0
+
+  rows.forEach((row) => {
+    const costing = costings.find(
+      (item) => String(item.boqItemId) === String(row.id)
+    )
+
+    if (!costing) return
+
+    costedRowCount += 1
+
+    const summary = calculateCostSummary({
+      boqQuantity: row.quantity,
+      costing,
+      freightCustomDutyPercent: row.freightCustomDutyPercent,
+      prelimsPercent: row.prelimsPercent,
+      fohPercent: row.fohPercent,
+      commitmentsPercent: row.commitmentsPercent,
+      contingenciesPercent: row.contingenciesPercent,
+      markup: row.markup,
+      masterItems,
+    })
+    const quantity = toNumber(row.quantity)
+
+    totals.contractValue += summary.sellingAmount
+    totals.budgetMaterial += summary.materialUnitCost * quantity
+    totals.budgetMachining += summary.machiningUnitCost * quantity
+    totals.budgetCoating += summary.coatingUnitCost * quantity
+    totals.budgetConsumables += summary.consumableUnitCost * quantity
+    totals.budgetSubcontracts += summary.subcontractUnitCost * quantity
+    totals.budgetProductionLabour += summary.productionLabourUnitCost * quantity
+    totals.budgetInstallationLabour += summary.installationLabourUnitCost * quantity
+    totals.budgetFreightCustom +=
+      summary.baseUnitCost * (toNumber(row.freightCustomDutyPercent) / 100) * quantity
+    totals.budgetPrelims +=
+      summary.baseUnitCost * (toNumber(row.prelimsPercent) / 100) * quantity
+    totals.budgetFoh +=
+      summary.baseUnitCost * (toNumber(row.fohPercent) / 100) * quantity
+    totals.budgetCommitments +=
+      summary.baseUnitCost * (toNumber(row.commitmentsPercent) / 100) * quantity
+    totals.budgetContingencies +=
+      summary.baseUnitCost * (toNumber(row.contingenciesPercent) / 100) * quantity
+  })
+
+  let message = `Loaded values from BOQ tender ${tenderNumber}${
+    latestRevision ? ` revision ${latestRevision}` : ''
+  }.`
+
+  if (costedRowCount === 0) {
+    message = `No costing details are saved for BOQ tender ${tenderNumber}${
+      latestRevision ? ` revision ${latestRevision}` : ''
+    }.`
+  } else if (totals.contractValue === 0) {
+    message = `BOQ loaded, but Selling Amount total is 0.00. Check that costing details and Markup are saved for tender ${tenderNumber}${
+      latestRevision ? ` revision ${latestRevision}` : ''
+    }.`
+  }
+
+  return {
+    values: formatRevenueBudgetTotals(totals),
+    message,
+  }
+}
+
+function createEmptyRevenueBudgetTotals() {
+  return {
+    contractValue: 0,
+    budgetMaterial: 0,
+    budgetMachining: 0,
+    budgetCoating: 0,
+    budgetConsumables: 0,
+    budgetSubcontracts: 0,
+    budgetProductionLabour: 0,
+    budgetFreightCustom: 0,
+    budgetInstallationLabour: 0,
+    budgetPrelims: 0,
+    budgetFoh: 0,
+    budgetCommitments: 0,
+    budgetContingencies: 0,
+  }
+}
+
+function formatRevenueBudgetTotals(
+  totals: ReturnType<typeof createEmptyRevenueBudgetTotals>
+) {
+  return Object.fromEntries(
+    Object.entries(totals).map(([key, value]) => [key, formatFormMoney(value)])
+  ) as Partial<RevenueForm>
+}
+
+function getLatestRevision(rows: BoqItem[]) {
+  return [...new Set(rows.map((row) => row.revisionNumber || ''))].sort(
+    compareRevisionNumbers
+  )[0]
+}
+
+function compareRevisionNumbers(a: string, b: string) {
+  const aNumber = Number(a.match(/\d+/g)?.at(-1) || -1)
+  const bNumber = Number(b.match(/\d+/g)?.at(-1) || -1)
+
+  if (aNumber !== bNumber) return bNumber - aNumber
+  return b.localeCompare(a)
+}
+
+function formatFormMoney(value: number) {
+  return toNumber(value).toFixed(2)
 }
 
 function toNumber(value: unknown) {

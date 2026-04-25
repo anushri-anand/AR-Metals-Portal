@@ -6,6 +6,7 @@ export default function VendorDataPage() {
       title="Vendor Data"
       links={[
         { label: 'Entry', href: '/procurement/vendor-data/entry' },
+        { label: 'View', href: '/procurement/vendor-data/view' },
       ]}
     />
   )

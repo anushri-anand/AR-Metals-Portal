@@ -1,12 +1,15 @@
 from django.urls import path
 
 from .views import (
+    BomalReportAPIView,
     BoqItemBulkSaveAPIView,
     BoqItemDetailAPIView,
     BoqItemImportAPIView,
     BoqItemListAPIView,
     ClientDataAPIView,
     ClientDataDetailAPIView,
+    CostingRevisionSnapshotAPIView,
+    CostingRevisionSnapshotApproveAPIView,
     ContractPaymentLogAPIView,
     ContractRevenueAPIView,
     ContractRevenueDetailAPIView,
@@ -80,4 +83,15 @@ urlpatterns = [
         TenderCostingDetailAPIView.as_view(),
         name='estimation-costing-detail',
     ),
+    path(
+        'costing-snapshots/',
+        CostingRevisionSnapshotAPIView.as_view(),
+        name='estimation-costing-snapshots',
+    ),
+    path(
+        'costing-snapshots/<int:pk>/approve/',
+        CostingRevisionSnapshotApproveAPIView.as_view(),
+        name='estimation-costing-snapshot-approve',
+    ),
+    path('bomal/', BomalReportAPIView.as_view(), name='estimation-bomal'),
 ]

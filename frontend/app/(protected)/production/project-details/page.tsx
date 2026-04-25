@@ -8,6 +8,7 @@ export default function ProjectDetailsPage() {
         { label: 'Entry', href: '/production/project-details/entry' },
         { label: 'Update', href: '/production/project-details/update' },
         { label: 'View', href: '/production/project-details/view' },
+        { label: 'Variation', href: '/production/project-details/variation' },
       ]}
     />
   )

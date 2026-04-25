@@ -42,9 +42,13 @@ export default function TenderCostingClient({
   boqItemId: string
 }) {
   const router = useRouter()
+  const [boqItems, setBoqItems] = useState<BoqItem[]>([])
   const [boqItem, setBoqItem] = useState<BoqItem | null>(null)
   const [masterItems, setMasterItems] = useState<MasterListItem[]>([])
   const [costing, setCosting] = useState<TenderCosting | null>(null)
+  const [copySourceId, setCopySourceId] = useState('')
+  const [copying, setCopying] = useState(false)
+  const [copyMessage, setCopyMessage] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -65,16 +69,41 @@ export default function TenderCostingClient({
         }
 
         const savedCosting = await getTenderCosting(selectedBoqItem.id)
+        let nextCosting =
+          savedCosting ||
+          createEmptyTenderCosting(
+            selectedBoqItem.id,
+            selectedBoqItem.tenderNumber
+          )
+        let nextCopyMessage = ''
 
+        if (!savedCosting) {
+          const previousRevisionBoqItem = findPreviousRevisionBoqItem(
+            savedBoqItems,
+            selectedBoqItem
+          )
+
+          if (previousRevisionBoqItem) {
+            const previousRevisionCosting = await getTenderCosting(
+              previousRevisionBoqItem.id
+            )
+
+            if (previousRevisionCosting) {
+              nextCosting = cloneCostingForCurrentBoq(
+                previousRevisionCosting,
+                nextCosting,
+                selectedBoqItem
+              )
+              nextCopyMessage = `Loaded ${getRevisionLabel(previousRevisionBoqItem.revisionNumber)} costing as the starting point for this row.`
+            }
+          }
+        }
+
+        setBoqItems(savedBoqItems)
         setBoqItem(selectedBoqItem)
         setMasterItems(savedMasterItems)
-        setCosting(
-          savedCosting ||
-            createEmptyTenderCosting(
-              selectedBoqItem.id,
-              selectedBoqItem.tenderNumber
-            )
-        )
+        setCosting(nextCosting)
+        setCopyMessage(nextCopyMessage)
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'Failed to load tender costing.'
@@ -99,6 +128,15 @@ export default function TenderCostingClient({
           masterItems,
         })
       : null
+
+  const copyOptions = boqItem
+    ? boqItems.filter(
+        (item) =>
+          String(item.id) !== String(boqItem.id) &&
+          item.tenderNumber === boqItem.tenderNumber &&
+          item.revisionNumber === boqItem.revisionNumber
+      )
+    : []
 
   function updateSimpleSectionItem(
     section: SimpleSectionName,
@@ -226,6 +264,31 @@ export default function TenderCostingClient({
     }
   }
 
+  async function handleCopyCosting() {
+    if (!boqItem || !costing || !copySourceId) return
+
+    setCopyMessage('')
+    setCopying(true)
+
+    try {
+      const sourceCosting = await getTenderCosting(copySourceId)
+
+      if (!sourceCosting) {
+        setCopyMessage('No saved costing found for the selected SN yet.')
+        return
+      }
+
+      setCosting(cloneCostingForCurrentBoq(sourceCosting, costing, boqItem))
+      setCopyMessage('Copied costing details. Review and save this SN when ready.')
+    } catch (err) {
+      setCopyMessage(
+        err instanceof Error ? err.message : 'Failed to copy costing details.'
+      )
+    } finally {
+      setCopying(false)
+    }
+  }
+
   if (error) {
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-red-800">
@@ -244,13 +307,72 @@ export default function TenderCostingClient({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-bold text-slate-900">
-          Costing - {boqItem.description || 'Tender Item'}
-        </h1>
-        <p className="mt-2 text-slate-700">
-          {boqItem.description} | Qty: {boqItem.quantity || 0} {boqItem.unit}
-        </p>
+      <div className="sticky top-24 z-30 rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/70">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Costing - {boqItem.description || 'Tender Item'}
+            </h1>
+            <p className="mt-2 text-slate-700">
+              SN: {boqItem.sn || '-'} | {boqItem.description} | Qty:{' '}
+              {boqItem.quantity || 0} {boqItem.unit}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="submit"
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"
+            >
+              Save Costing
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push('/estimation/costing')}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+            >
+              Back to Costing
+            </button>
+          </div>
+        </div>
+
+        {copyOptions.length > 0 && (
+          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <Field label="Copy costing details from SN">
+                <select
+                  value={copySourceId}
+                  onChange={(e) => {
+                    setCopySourceId(e.target.value)
+                    setCopyMessage('')
+                  }}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                >
+                  <option value="">Select SN to copy</option>
+                  {copyOptions.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      SN {item.sn || item.id} - {item.description || 'Tender Item'}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <button
+                type="button"
+                disabled={!copySourceId || copying}
+                onClick={handleCopyCosting}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {copying ? 'Copying...' : 'Copy Details'}
+              </button>
+            </div>
+
+            {copyMessage && (
+              <p className="mt-3 text-sm text-slate-700">{copyMessage}</p>
+            )}
+          </div>
+        )}
+
         {masterItems.length === 0 && (
           <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
             Add items in Estimation - Master List first, then select them here.
@@ -350,23 +472,94 @@ export default function TenderCostingClient({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <button
-          type="submit"
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"
-        >
-          Save Costing
-        </button>
-        <button
-          type="button"
-          onClick={() => router.push('/estimation/costing')}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
-        >
-          Back to Costing
-        </button>
-      </div>
     </form>
   )
+}
+
+function cloneCostingForCurrentBoq(
+  source: TenderCosting,
+  current: TenderCosting,
+  boqItem: BoqItem
+): TenderCosting {
+  return {
+    ...source,
+    id: current.id,
+    boqItemId: boqItem.id,
+    tenderNumber: boqItem.tenderNumber,
+    material: source.material.map((item) => ({ ...item })),
+    machining: source.machining.map((item) => ({ ...item })),
+    coating: source.coating.map((item) => ({ ...item })),
+    consumable: source.consumable.map((item) => ({ ...item })),
+    subcontract: source.subcontract.map((item) => ({ ...item })),
+    productionLabour: labourStageNames.reduce((details, stage) => {
+      details[stage] = { ...source.productionLabour[stage] }
+      return details
+    }, {} as ProductionLabourDetails),
+    installationLabour: { ...source.installationLabour },
+  }
+}
+
+function findPreviousRevisionBoqItem(items: BoqItem[], currentRow: BoqItem) {
+  const previousRevision = getPreviousRevisionNumber(
+    items,
+    currentRow.tenderNumber,
+    currentRow.revisionNumber
+  )
+
+  if (!previousRevision) {
+    return null
+  }
+
+  return (
+    items.find(
+      (item) =>
+        item.tenderNumber === currentRow.tenderNumber &&
+        item.revisionNumber === previousRevision &&
+        String(item.sn) === String(currentRow.sn)
+    ) ||
+    items.find(
+      (item) =>
+        item.tenderNumber === currentRow.tenderNumber &&
+        item.revisionNumber === previousRevision &&
+        item.description === currentRow.description
+    ) ||
+    null
+  )
+}
+
+function getPreviousRevisionNumber(
+  items: BoqItem[],
+  tenderNumber: string,
+  currentRevision: string
+) {
+  const revisions = [...new Set(
+    items
+      .filter((item) => item.tenderNumber === tenderNumber)
+      .map((item) => String(item.revisionNumber || '').trim())
+  )].sort(compareRevisionNumbers)
+
+  return (
+    revisions.filter((revision) =>
+      compareRevisionNumbers(revision, String(currentRevision || '').trim()) < 0
+    ).at(-1) || ''
+  )
+}
+
+function compareRevisionNumbers(left: string, right: string) {
+  const leftMatch = left.match(/\d+/g)
+  const rightMatch = right.match(/\d+/g)
+  const leftNumber = leftMatch ? Number(leftMatch.at(-1)) : -1
+  const rightNumber = rightMatch ? Number(rightMatch.at(-1)) : -1
+
+  if (leftNumber !== rightNumber) {
+    return leftNumber - rightNumber
+  }
+
+  return left.localeCompare(right)
+}
+
+function getRevisionLabel(revisionNumber: string) {
+  return revisionNumber ? revisionNumber : 'Current Revision'
 }
 
 function MultiWastageSection({
@@ -427,7 +620,7 @@ function MultiWastageSection({
                 </Field>
                 <ReadOnlyField
                   label="Qty Inc Wastage"
-                  value={quantityIncWastage ? formatMoney(quantityIncWastage) : ''}
+                  value={quantityIncWastage ? formatQuantity(quantityIncWastage) : ''}
                 />
                 <ReadOnlyField label="Unit" value={masterItem?.unit || ''} />
                 <ReadOnlyField
@@ -772,12 +965,39 @@ function NumberInput({
   onChange: (value: string) => void
   placeholder: string
 }) {
+  const [inputValue, setInputValue] = useState(String(value ?? ''))
+  const [isFocused, setIsFocused] = useState(false)
+  const displayValue = isFocused ? inputValue : String(value ?? '')
+
   return (
     <input
-      type="number"
-      step="0.01"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
+      type="text"
+      inputMode="decimal"
+      value={displayValue}
+      onFocus={() => {
+        setInputValue(String(value ?? ''))
+        setIsFocused(true)
+      }}
+      onBlur={() => {
+        setIsFocused(false)
+        if (!inputValue || inputValue === '.') {
+          setInputValue('')
+          onChange('')
+          return
+        }
+
+        setInputValue(inputValue)
+      }}
+      onChange={(e) => {
+        const nextValue = e.target.value
+
+        if (!/^\d*(?:\.\d{0,3})?$/.test(nextValue)) {
+          return
+        }
+
+        setInputValue(nextValue)
+        onChange(nextValue)
+      }}
       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
       placeholder={placeholder}
     />
@@ -793,4 +1013,18 @@ function SummaryCard({ label, value }: { label: string; value: number }) {
       </p>
     </div>
   )
+}
+
+function formatQuantity(value: string | number) {
+  const raw = String(value ?? '').trim()
+
+  if (!raw) return '0'
+
+  const parsed = Number(raw)
+
+  if (!Number.isFinite(parsed)) return '0'
+
+  return raw
+    .replace(/(\.\d*?[1-9])0+$/, '$1')
+    .replace(/\.0+$/, '')
 }

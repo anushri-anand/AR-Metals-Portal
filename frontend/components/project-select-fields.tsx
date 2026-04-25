@@ -7,12 +7,19 @@ type ProjectOption = {
   id: number
   project_name: string
   project_number: string
+  tender_number?: string
+  revision_number?: string
 }
 
 type ProjectSelectFieldsProps = {
   projectNumber: string
   projectName: string
-  onChange: (value: { projectNumber: string; projectName: string }) => void
+  onChange: (value: {
+    projectNumber: string
+    projectName: string
+    tenderNumber?: string
+    revisionNumber?: string
+  }) => void
 }
 
 export default function ProjectSelectFields({
@@ -43,6 +50,8 @@ export default function ProjectSelectFields({
     onChange({
       projectNumber: value,
       projectName: selectedProject ? selectedProject.project_name : '',
+      tenderNumber: selectedProject?.tender_number || '',
+      revisionNumber: selectedProject?.revision_number || '',
     })
   }
 
@@ -54,6 +63,8 @@ export default function ProjectSelectFields({
     onChange({
       projectName: value,
       projectNumber: selectedProject ? selectedProject.project_number : '',
+      tenderNumber: selectedProject?.tender_number || '',
+      revisionNumber: selectedProject?.revision_number || '',
     })
   }
 

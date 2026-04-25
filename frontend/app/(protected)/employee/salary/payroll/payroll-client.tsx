@@ -30,6 +30,10 @@ type PayrollResponse = {
   normal_ot_amount: string
   sunday_ot_amount: string
   public_holiday_ot_amount: string
+  total_ot_amount: string
+  leave_salary_amount: string
+  gratuity_amount: string
+  incentive: string
   advance_balance: string
   advance_deduction: string
   other_deduction: string
@@ -64,6 +68,7 @@ export default function PayrollClient() {
   const [month, setMonth] = useState(String(initialMonth))
   const [year, setYear] = useState(String(initialYear))
   const [otherDeduction, setOtherDeduction] = useState('0')
+  const [incentive, setIncentive] = useState('0')
   const [advanceBalance, setAdvanceBalance] = useState('0')
   const [advanceDeduction, setAdvanceDeduction] = useState('0')
   const [payroll, setPayroll] = useState<PayrollResponse | null>(null)
@@ -101,6 +106,7 @@ export default function PayrollClient() {
             year: Number(year),
             advance_deduction: '0',
             other_deduction: '0',
+            incentive: '0',
           }),
         })
   
@@ -146,7 +152,7 @@ export default function PayrollClient() {
     setPayroll(null)
 
     try {
-      const data = await fetchAPI('/employees/salary/payroll-preview/', {
+      const data = await fetchAPI('/employees/salary/payroll/', {
         method: 'POST',
         body: JSON.stringify({
           employee_id: selectedEmployeeId,
@@ -154,6 +160,7 @@ export default function PayrollClient() {
           year: Number(year),
           other_deduction: otherDeduction || '0',
           advance_deduction: advanceDeduction || '0',
+          incentive: incentive || '0',
         }),
       })
 
@@ -277,6 +284,19 @@ export default function PayrollClient() {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
             />
           </Field>
+
+          <Field label="Incentive">
+            <input
+              type="number"
+              step="0.01"
+              value={incentive}
+              onChange={(e) => {
+                setIncentive(e.target.value)
+                setPayroll(null)
+              }}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+            />
+          </Field>
         </div>
 
         <div className="mt-8 flex items-center gap-4">
@@ -382,6 +402,13 @@ export default function PayrollClient() {
                   <td className="py-3 pr-4 text-slate-800">-</td>
                 </tr>
 
+                <tr className="border-b border-slate-100">
+                  <td className="py-3 pr-4 text-slate-800">Incentive</td>
+                  <td className="py-3 pr-4 text-slate-800">-</td>
+                  <td className="py-3 pr-4 text-slate-800">{formatMoney(payroll.incentive)}</td>
+                  <td className="py-3 pr-4 text-slate-800">-</td>
+                </tr>
+
                 <tr className="border-b border-slate-200 font-semibold">
                   <td className="py-3 pr-4 text-slate-900">Total</td>
                   <td className="py-3 pr-4 text-slate-900">-</td>
@@ -421,5 +448,8 @@ function Field({
 }
 
 function formatMoney(value: string) {
-  return Number(value).toFixed(2)
+  return Number(value).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 }

@@ -33,7 +33,7 @@ export default function ClientDataViewClient() {
             <thead className="sticky top-0 z-10 bg-slate-50 text-left text-slate-700">
               <tr>
                 <th className="px-4 py-3 font-semibold">Client Name</th>
-                <th className="px-4 py-3 font-semibold">Supplier TRN No.</th>
+                <th className="px-4 py-3 font-semibold">Client TRN No.</th>
                 <th className="px-4 py-3 font-semibold">Country</th>
                 <th className="px-4 py-3 font-semibold">City</th>
                 <th className="px-4 py-3 font-semibold">Contact Person</th>
