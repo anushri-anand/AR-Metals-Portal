@@ -31,7 +31,7 @@ function getParentPath(pathname: string) {
   const parts = pathname.split('/').filter(Boolean)
 
   if (parts.length <= 1) {
-    return '/dashboard'
+    return ''
   }
 
   return `/${parts.slice(0, -1).join('/')}`

@@ -7,6 +7,11 @@ import {
   normalizeAccountCode,
   requiresManualAccountCode,
 } from '@/lib/account-codes'
+import {
+  compareVariationNumbers,
+  getVariationDisplayLabel,
+  normalizeVariationNumber,
+} from '@/lib/variation-number'
 
 type EmployeeOption = {
   id: number
@@ -23,13 +28,14 @@ type ProjectItem = {
 }
 
 type VariationItem = {
-  id: number
+  id: number | string
+  boq_sn?: string
   package?: string
   item_name: string
 }
 
 type VariationOption = {
-  id: number
+  id: number | string
   variation_number: string
   items: VariationItem[]
 }
@@ -119,15 +125,21 @@ function getPackageOptions(
   allocation: Allocation,
   projectOptions: ProjectOption[]
 ) {
-  if (allocation.variationNumber) {
-    return []
-  }
+  const project = getProjectForAllocation(allocation, projectOptions)
+
+  const items = allocation.variationNumber
+    ? (
+        (project?.variations || []).find(
+          (variation) =>
+            normalizeVariationNumber(variation.variation_number) ===
+            normalizeVariationNumber(allocation.variationNumber)
+        )?.items || []
+      )
+    : getBaseProjectItems(allocation, projectOptions)
 
   return Array.from(
     new Set(
-      getBaseProjectItems(allocation, projectOptions)
-        .map((item) => item.package || '')
-        .filter(Boolean)
+      items.map((item) => item.package || '').filter(Boolean)
     )
   ).sort((left, right) => left.localeCompare(right))
 }
@@ -147,7 +159,7 @@ export default function TimeAllocationEntryForm() {
       try {
         const [employees, projects] = await Promise.all([
           fetchAPI('/employees/options/'),
-          fetchAPI('/production/project-details/options/'),
+          fetchAPI('/production/contract-options/'),
         ])
 
         setEmployeeOptions(employees)
@@ -315,7 +327,7 @@ export default function TimeAllocationEntryForm() {
   function getVariationOptions(allocation: Allocation) {
     const project = getProjectForAllocation(allocation, projectOptions)
     return (project?.variations || []).slice().sort((left, right) =>
-      left.variation_number.localeCompare(right.variation_number)
+      compareVariationNumbers(left.variation_number, right.variation_number)
     )
   }
 
@@ -365,9 +377,6 @@ export default function TimeAllocationEntryForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Time Allocation Entry</h1>
-        <p className="mt-2 text-slate-700">
-          Allocate employee time across projects and packages.
-        </p>
       </div>
 
       <form
@@ -381,7 +390,9 @@ export default function TimeAllocationEntryForm() {
               name="date"
               value={form.date}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.date ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>
@@ -390,7 +401,9 @@ export default function TimeAllocationEntryForm() {
             <select
               value={form.employeeId}
               onChange={(e) => handleEmployeeIdChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.employeeId ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select employee ID</option>
@@ -406,7 +419,9 @@ export default function TimeAllocationEntryForm() {
             <select
               value={form.employeeName}
               onChange={(e) => handleEmployeeNameChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.employeeName ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select employee name</option>
@@ -422,7 +437,9 @@ export default function TimeAllocationEntryForm() {
             <select
               value={form.costCode}
               onChange={(e) => handleCostCodeChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.costCode ? 'text-black' : 'text-neutral-400'
+              }`}
               disabled={!form.employeeId}
               required
             >
@@ -512,7 +529,9 @@ export default function TimeAllocationEntryForm() {
                       onChange={(e) =>
                         handleAllocationChange(index, 'projectNumber', e.target.value)
                       }
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                      className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                        allocation.projectNumber ? 'text-black' : 'text-neutral-400'
+                      }`}
                       required
                     >
                       <option value="">Select project #</option>
@@ -538,7 +557,7 @@ export default function TimeAllocationEntryForm() {
                           key={variation.id}
                           value={variation.variation_number}
                         >
-                          {variation.variation_number}
+                          {getVariationDisplayLabel(variation.variation_number)}
                         </option>
                       ))}
                     </select>
@@ -550,7 +569,9 @@ export default function TimeAllocationEntryForm() {
                       onChange={(e) =>
                         handleAllocationChange(index, 'projectName', e.target.value)
                       }
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                      className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                        allocation.projectName ? 'text-black' : 'text-neutral-400'
+                      }`}
                       required
                     >
                       <option value="">Select project name</option>
@@ -568,17 +589,12 @@ export default function TimeAllocationEntryForm() {
                       onChange={(e) =>
                         handleAllocationChange(index, 'package', e.target.value)
                       }
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-                      required={!allocation.variationNumber}
-                      disabled={
-                        (!allocation.projectName && !allocation.projectNumber) || Boolean(allocation.variationNumber)
-                      }
+                      className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                        allocation.package ? 'text-black' : 'text-neutral-400'
+                      }`}
+                      disabled={!allocation.projectName && !allocation.projectNumber}
                     >
-                      <option value="">
-                        {allocation.variationNumber
-                          ? 'Variation allocation'
-                          : 'Select package'}
-                      </option>
+                      <option value="">Select package</option>
                       {getPackageOptions(allocation, projectOptions).map((packageValue) => (
                         <option key={packageValue} value={packageValue}>
                           {packageValue}
@@ -662,7 +678,7 @@ function getUpdatedAllocation(
   if (field === 'variationNumber') {
     return {
       ...allocation,
-      variationNumber: value,
+      variationNumber: normalizeVariationNumber(value),
       package: '',
     }
   }

@@ -7,11 +7,12 @@ from django.db import transaction
 from django.db.models import Q, Sum
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from accounts.permissions import ApiRoleAccessPermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from production.models import TimeAllocationLine
-from shared.company import get_company_from_request
+from shared.company import get_company_from_request, normalize_company
 from shared.period_closing import (
     ensure_request_dates_in_open_period,
     validate_month_in_open_period,
@@ -26,6 +27,7 @@ from .models import (
     Employee,
     EmployeeDetailHistory,
     PayrollRecord,
+    PublicHolidayDate,
     SalaryAdvance,
     SalaryAdvanceDeduction,
     TimeEntry,
@@ -43,6 +45,8 @@ from .serializers import (
     EmployeeUpdateSerializer,
     PayrollRequestSerializer,
     PayrollResponseSerializer,
+    PublicHolidayDateCreateSerializer,
+    SalarySummaryResponseSerializer,
     SalaryActualIncurredCostRowSerializer,
     SalaryAdvanceCreateSerializer,
     SalaryAdvanceSerializer,
@@ -52,6 +56,12 @@ from .serializers import (
 
 def to_money(value: Decimal) -> Decimal:
     return value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+SALARY_SUMMARY_COMPANY_NAMES = {
+    'ARM': 'AL RIYADA METAL INDUSTRIAL LLC SP',
+    'AKR': 'AKR METAL INDUSTRIAL LLC',
+}
 
 
 def get_overlap_days(
@@ -255,8 +265,8 @@ def build_payroll_payload(
         basic_salary_monthly * Decimal('12')
     ) / (Decimal('365') * Decimal('8'))
 
-    normal_ot_amount = to_money(ot_base_rate * normal_ot_hours)
-    sunday_ot_amount = to_money(ot_base_rate * sunday_ot_hours * Decimal('1.25'))
+    normal_ot_amount = to_money(ot_base_rate * normal_ot_hours * Decimal('1.25'))
+    sunday_ot_amount = to_money(ot_base_rate * sunday_ot_hours * Decimal('1.5'))
     public_holiday_ot_amount = to_money(
         ot_base_rate * public_holiday_ot_hours * Decimal('2')
     )
@@ -312,6 +322,11 @@ def build_payroll_payload(
     net_pay = to_money(total_earned - total_deductions)
 
     payload = {
+        'company_code': salary_row.visa_under,
+        'company_display_name': SALARY_SUMMARY_COMPANY_NAMES.get(
+            salary_row.visa_under,
+            salary_row.visa_under,
+        ),
         'employee_id': employee.employee_id,
         'employee_name': employee.employee_name,
         'month': month,
@@ -382,6 +397,24 @@ def calculate_time_entry_overtime(
     return normal_ot, sunday_ot, public_holiday_ot
 
 
+def get_effective_regular_duty_hours(
+    regular_duty_hours: Decimal,
+    entry_date: date,
+    is_public_holiday: bool,
+) -> Decimal:
+    if is_public_holiday or entry_date.strftime('%A') == 'Sunday':
+        return Decimal('0.00')
+
+    return regular_duty_hours
+
+
+def is_public_holiday_date(entry_date: date) -> bool:
+    return (
+        PublicHolidayDate.objects.filter(date=entry_date).exists()
+        or TimeEntry.objects.filter(date=entry_date, is_public_holiday=True).exists()
+    )
+
+
 def refresh_public_holiday_entries(entry_date: date):
     holiday_entries = (
         TimeEntry.objects
@@ -402,22 +435,29 @@ def refresh_public_holiday_entries(entry_date: date):
             or entry.medical_leave_without_doc
             or entry.absent
         )
+        effective_regular_duty_hours = get_effective_regular_duty_hours(
+            regular_duty_hours=entry.regular_duty_hours,
+            entry_date=entry.date,
+            is_public_holiday=True,
+        )
         normal_ot, sunday_ot, public_holiday_ot = calculate_time_entry_overtime(
             employee_category=employee_category,
             total_time=entry.total_time,
-            regular_duty_hours=entry.regular_duty_hours,
+            regular_duty_hours=effective_regular_duty_hours,
             is_public_holiday=True,
             day=entry.day,
             is_leave_or_absent=is_leave_or_absent,
         )
 
         entry.is_public_holiday = True
+        entry.regular_duty_hours = effective_regular_duty_hours
         entry.normal_ot = normal_ot
         entry.sunday_ot = sunday_ot
         entry.public_holiday_ot = public_holiday_ot
         entry.save(
             update_fields=[
                 'is_public_holiday',
+                'regular_duty_hours',
                 'normal_ot',
                 'sunday_ot',
                 'public_holiday_ot',
@@ -426,7 +466,7 @@ def refresh_public_holiday_entries(entry_date: date):
 
 
 class EmployeeOptionsAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         employees = Employee.objects.prefetch_related('detail_history').all().order_by('employee_id')
@@ -435,7 +475,7 @@ class EmployeeOptionsAPIView(APIView):
 
 
 class EmployeeDetailEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request, required=False)
@@ -481,7 +521,7 @@ class EmployeeDetailEntryAPIView(APIView):
 
 
 class EmployeeDetailUpdateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request, required=False)
@@ -560,7 +600,7 @@ class EmployeeDetailUpdateAPIView(APIView):
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 class EmployeeDetailHistoryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         employee_id = request.query_params.get('employee_id')
@@ -577,7 +617,7 @@ class EmployeeDetailHistoryAPIView(APIView):
 
 
 class TimeEntryCreateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request, required=False)
@@ -605,19 +645,25 @@ class TimeEntryCreateAPIView(APIView):
         is_leave_or_absent = medical_leave_with_doc or medical_leave_without_doc or absent
 
         regular_duty_hours = Decimal(data['regular_duty_hours'])
-        is_public_holiday = data.get('is_public_holiday', False) or TimeEntry.objects.filter(
-            date=entry_date,
-            is_public_holiday=True,
-        ).exists()
+        is_public_holiday = data.get('is_public_holiday', False) or is_public_holiday_date(entry_date)
+        regular_duty_hours = get_effective_regular_duty_hours(
+            regular_duty_hours=regular_duty_hours,
+            entry_date=entry_date,
+            is_public_holiday=is_public_holiday,
+        )
 
         total_time = Decimal('0.00')
 
         start_time = data.get('start_time')
         finish_time = data.get('finish_time')
+        finish_time_is_2400 = data.get('finish_time_is_2400', False)
 
         if not is_leave_or_absent and start_time and finish_time:
             start_dt = datetime.combine(entry_date, start_time)
             finish_dt = datetime.combine(entry_date, finish_time)
+
+            if finish_time_is_2400:
+                finish_dt += timedelta(days=1)
 
             total_hours = Decimal((finish_dt - start_dt).total_seconds()) / Decimal('3600')
             total_time = total_hours.quantize(Decimal('0.01'))
@@ -638,6 +684,7 @@ class TimeEntryCreateAPIView(APIView):
             is_public_holiday=is_public_holiday,
             start_time=start_time,
             finish_time=finish_time,
+            finish_time_is_2400=finish_time_is_2400,
             total_time=total_time,
             regular_duty_hours=regular_duty_hours,
             normal_ot=normal_ot,
@@ -650,18 +697,20 @@ class TimeEntryCreateAPIView(APIView):
         )
 
         if is_public_holiday:
+            PublicHolidayDate.objects.get_or_create(date=entry_date)
             refresh_public_holiday_entries(entry_date)
 
         response_serializer = TimeEntrySerializer(time_entry)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 class TimeEntryListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         employee_id = request.query_params.get('employee_id')
         date_from = request.query_params.get('date_from')
         date_to = request.query_params.get('date_to')
+        limit = request.query_params.get('limit')
 
         queryset = TimeEntry.objects.select_related('employee').all()
 
@@ -676,26 +725,48 @@ class TimeEntryListAPIView(APIView):
 
         queryset = queryset.order_by('-date', 'employee__employee_id', '-created_at')
 
+        if limit:
+            try:
+                limit_value = int(limit)
+            except (TypeError, ValueError):
+                limit_value = 0
+
+            if limit_value > 0:
+                queryset = queryset[:limit_value]
+
         serializer = TimeEntrySerializer(queryset, many=True)
         return Response(serializer.data)
 
 
 class PublicHolidayDateListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
-        holiday_dates = (
-            TimeEntry.objects
-            .filter(is_public_holiday=True)
-            .values_list('date', flat=True)
-            .distinct()
-            .order_by('date')
+        holiday_dates = sorted(
+            {
+                *PublicHolidayDate.objects.values_list('date', flat=True),
+                *TimeEntry.objects.filter(is_public_holiday=True).values_list('date', flat=True),
+            }
         )
         return Response([holiday_date.isoformat() for holiday_date in holiday_dates])
 
+    def post(self, request):
+        company = get_company_from_request(request, required=False)
+        ensure_request_dates_in_open_period(request.data, company)
+        serializer = PublicHolidayDateCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        holiday, _ = PublicHolidayDate.objects.get_or_create(
+            date=serializer.validated_data['date']
+        )
+        refresh_public_holiday_entries(holiday.date)
+        return Response(
+            {'date': holiday.date.isoformat(), 'is_public_holiday': True},
+            status=status.HTTP_201_CREATED,
+        )
+
 
 class AnnualLeaveCreateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request, required=False)
@@ -718,7 +789,7 @@ class AnnualLeaveCreateAPIView(APIView):
 
 
 class SalaryAdvanceCreateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request, required=False)
@@ -741,7 +812,7 @@ class SalaryAdvanceCreateAPIView(APIView):
 
 
 class AssociatedCostEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request, required=False)
@@ -792,7 +863,7 @@ class AssociatedCostEntryAPIView(APIView):
 
 
 class AssociatedCostEntryListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         entries = AssociatedCostEntry.objects.prefetch_related(
@@ -804,7 +875,7 @@ class AssociatedCostEntryListAPIView(APIView):
 
 
 class AssociatedCostPaymentEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request, required=False)
@@ -884,7 +955,7 @@ class AssociatedCostPaymentEntryAPIView(APIView):
 
 
 class AssociatedCostPaymentListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         payments = AssociatedCostPayment.objects.select_related('entry').prefetch_related(
@@ -896,7 +967,7 @@ class AssociatedCostPaymentListAPIView(APIView):
 
 
 class PayrollPreviewAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request, required=False)
@@ -934,7 +1005,7 @@ class PayrollPreviewAPIView(APIView):
 
 
 class PayrollGenerateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request, required=False)
@@ -1079,8 +1150,130 @@ class PayrollGenerateAPIView(APIView):
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 
+class SalarySummaryAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+
+    def get(self, request):
+        company = normalize_company(request.query_params.get('company'))
+        month = request.query_params.get('month')
+        year = request.query_params.get('year')
+        category = str(request.query_params.get('category') or '').strip().title()
+
+        if not company:
+            return Response(
+                {'detail': 'Select ARM or AKR.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            month_value = int(month or '')
+            year_value = int(year or '')
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': 'Select a valid month and year.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if month_value < 1 or month_value > 12:
+            return Response(
+                {'detail': 'Month must be between 1 and 12.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if category not in {'Staff', 'Labour'}:
+            return Response(
+                {'detail': 'Select Staff or Labour.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        month_start = get_month_start(year_value, month_value)
+        month_end = get_month_end(year_value, month_value)
+
+        payroll_records = (
+            PayrollRecord.objects.select_related('employee')
+            .filter(month=month_value, year=year_value, category=category)
+            .order_by('employee__employee_id')
+        )
+
+        rows = []
+        totals = {
+            'basic': Decimal('0.00'),
+            'allow': Decimal('0.00'),
+            'total_working_days': Decimal('0.00'),
+            'normal_ot_hours': Decimal('0.00'),
+            'sunday_ot_hours': Decimal('0.00'),
+            'public_holiday_ot_hours': Decimal('0.00'),
+            'earned_basic': Decimal('0.00'),
+            'earned_allow': Decimal('0.00'),
+            'earned_ot_amount': Decimal('0.00'),
+            'gross_salary': Decimal('0.00'),
+            'incentive': Decimal('0.00'),
+            'advance_deduction': Decimal('0.00'),
+            'other_deduction': Decimal('0.00'),
+            'salary_payable': Decimal('0.00'),
+        }
+
+        for payroll_record in payroll_records:
+            salary_row = get_salary_row_for_month(
+                payroll_record.employee,
+                month_start,
+                month_end,
+            )
+
+            if not salary_row or salary_row.visa_under != company:
+                continue
+
+            earned_ot_amount = to_money(
+                payroll_record.normal_ot_amount
+                + payroll_record.sunday_ot_amount
+                + payroll_record.public_holiday_ot_amount
+            )
+            gross_salary = to_money(
+                payroll_record.basic_salary_earned
+                + payroll_record.other_allowances_earned
+                + earned_ot_amount
+            )
+
+            row = {
+                'sn': len(rows) + 1,
+                'employee_id': payroll_record.employee.employee_id,
+                'employee_name': payroll_record.employee.employee_name,
+                'basic': to_money(payroll_record.basic_salary_monthly),
+                'allow': to_money(payroll_record.other_allowances_monthly),
+                'total_working_days': Decimal(payroll_record.total_working_days).quantize(Decimal('0.01')),
+                'normal_ot_hours': to_money(payroll_record.normal_ot_hours),
+                'sunday_ot_hours': to_money(payroll_record.sunday_ot_hours),
+                'public_holiday_ot_hours': to_money(payroll_record.public_holiday_ot_hours),
+                'earned_basic': to_money(payroll_record.basic_salary_earned),
+                'earned_allow': to_money(payroll_record.other_allowances_earned),
+                'earned_ot_amount': earned_ot_amount,
+                'gross_salary': gross_salary,
+                'incentive': to_money(payroll_record.incentive),
+                'advance_deduction': to_money(payroll_record.advance_deduction),
+                'other_deduction': to_money(payroll_record.other_deduction),
+                'salary_payable': to_money(payroll_record.net_pay),
+            }
+            rows.append(row)
+
+            for key in totals:
+                totals[key] = to_money(totals[key] + row[key])
+
+        payload = {
+            'company': company,
+            'company_display_name': SALARY_SUMMARY_COMPANY_NAMES.get(company, company),
+            'month': month_value,
+            'year': year_value,
+            'category': category,
+            'rows': rows,
+            'totals': totals,
+        }
+
+        serializer = SalarySummaryResponseSerializer(payload)
+        return Response(serializer.data)
+
+
 class SalaryActualIncurredCostAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         payroll_records = (

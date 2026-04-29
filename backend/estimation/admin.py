@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     BoqItem,
+    ClientContact,
     ClientData,
     ContractPaymentLog,
     ContractRevenue,
@@ -24,6 +25,12 @@ class ClientDataAdmin(admin.ModelAdmin):
         'email',
     )
     search_fields = ('client_name', 'supplier_trn_no', 'contact_person', 'email')
+
+
+@admin.register(ClientContact)
+class ClientContactAdmin(admin.ModelAdmin):
+    list_display = ('client', 'name', 'mobile_number', 'email')
+    search_fields = ('client__client_name', 'name', 'mobile_number', 'email')
 
 
 @admin.register(TenderLog)

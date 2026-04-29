@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
 import { getContractRevenues, getTenderLogs, TenderLog } from '@/lib/estimation-storage'
 
@@ -113,18 +113,10 @@ export default function BomalClient() {
     void loadReport()
   }, [projectName, projectNumber, tenderNumber])
 
-  const rowCount = useMemo(
-    () => report?.sections.reduce((total, section) => total + section.rows.length, 0) ?? 0,
-    [report]
-  )
-
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">BOMAL</h1>
-        <p className="mt-2 text-slate-700">
-          View the bill of materials and labours for the selected project.
-        </p>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -269,12 +261,6 @@ export default function BomalClient() {
           <div className="p-8 text-slate-700">No report found.</div>
         )}
 
-        {report ? (
-          <div className="border-t border-slate-200 px-8 py-4 text-sm text-slate-600">
-            Showing {rowCount} {rowCount === 1 ? 'line item' : 'line items'} across{' '}
-            {report.sections.length} {report.sections.length === 1 ? 'section' : 'sections'}.
-          </div>
-        ) : null}
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import {
   BoqItem,
@@ -37,11 +37,14 @@ type WastageSectionName = 'material' | 'consumable'
 export default function TenderCostingClient({
   tenderNumber,
   boqItemId,
+  mode = 'original',
 }: {
   tenderNumber: string
   boqItemId: string
+  mode?: 'original' | 'variation'
 }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [boqItems, setBoqItems] = useState<BoqItem[]>([])
   const [boqItem, setBoqItem] = useState<BoqItem | null>(null)
   const [masterItems, setMasterItems] = useState<MasterListItem[]>([])
@@ -50,6 +53,12 @@ export default function TenderCostingClient({
   const [copying, setCopying] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [error, setError] = useState('')
+  const isVariationBoq =
+    mode === 'variation' || Boolean(boqItem?.variationNumber?.trim())
+  const costingReturnPath = buildCostingReturnPath(
+    isVariationBoq,
+    searchParams
+  )
 
   useEffect(() => {
     async function loadData() {
@@ -129,13 +138,27 @@ export default function TenderCostingClient({
         })
       : null
 
+  const latestOriginalRevision = boqItem
+    ? getLatestOriginalRevisionNumber(boqItems, boqItem.tenderNumber)
+    : ''
+
   const copyOptions = boqItem
-    ? boqItems.filter(
-        (item) =>
-          String(item.id) !== String(boqItem.id) &&
-          item.tenderNumber === boqItem.tenderNumber &&
+    ? boqItems.filter((item) => {
+        if (String(item.id) === String(boqItem.id)) return false
+        if (item.tenderNumber !== boqItem.tenderNumber) return false
+
+        if (isVariationBoq) {
+          return (
+            !item.variationNumber &&
+            String(item.revisionNumber || '').trim() === latestOriginalRevision
+          )
+        }
+
+        return (
+          !item.variationNumber &&
           item.revisionNumber === boqItem.revisionNumber
-      )
+        )
+      })
     : []
 
   function updateSimpleSectionItem(
@@ -153,7 +176,22 @@ export default function TenderCostingClient({
           itemIndex === index
             ? {
                 ...item,
-                [field]: field === 'quantity' ? Number(value || 0) : value,
+                [field]:
+                  field === 'quantity'
+                    ? Number(value || 0)
+                    : field === 'rate'
+                      ? value === ''
+                        ? null
+                        : Number(value || 0)
+                      : value,
+                ...(field === 'itemId' && isVariationBoq
+                  ? {
+                      rate:
+                        getMasterItem(masterItems, value)?.rate ??
+                        item.rate ??
+                        null,
+                    }
+                  : {}),
               }
             : item
         ),
@@ -190,7 +228,19 @@ export default function TenderCostingClient({
                 [field]:
                   field === 'quantity' || field === 'wastagePercent'
                     ? Number(value || 0)
+                    : field === 'rate'
+                      ? value === ''
+                        ? null
+                        : Number(value || 0)
                     : value,
+                ...(field === 'itemId' && isVariationBoq
+                  ? {
+                      rate:
+                        getMasterItem(masterItems, value)?.rate ??
+                        item.rate ??
+                        null,
+                    }
+                  : {}),
               }
             : item
         ),
@@ -258,7 +308,7 @@ export default function TenderCostingClient({
         boqItemId: boqItem.id,
         tenderNumber: boqItem.tenderNumber,
       })
-      router.push('/estimation/costing')
+      router.push(costingReturnPath)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save costing.')
     }
@@ -311,11 +361,15 @@ export default function TenderCostingClient({
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">
-              Costing - {boqItem.description || 'Tender Item'}
+              {isVariationBoq ? 'Variation Costing' : 'Costing'} -{' '}
+              {boqItem.description || 'Tender Item'}
             </h1>
             <p className="mt-2 text-slate-700">
               SN: {boqItem.sn || '-'} | {boqItem.description} | Qty:{' '}
               {boqItem.quantity || 0} {boqItem.unit}
+              {isVariationBoq && boqItem.variationNumber
+                ? ` | Variation: ${boqItem.variationNumber}`
+                : ''}
             </p>
           </div>
 
@@ -328,7 +382,7 @@ export default function TenderCostingClient({
             </button>
             <button
               type="button"
-              onClick={() => router.push('/estimation/costing')}
+              onClick={() => router.push(costingReturnPath)}
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
             >
               Back to Costing
@@ -339,7 +393,13 @@ export default function TenderCostingClient({
         {copyOptions.length > 0 && (
           <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-              <Field label="Copy costing details from SN">
+              <Field
+                label={
+                  isVariationBoq
+                    ? 'Copy costing details from Original BOQ SN'
+                    : 'Copy costing details from SN'
+                }
+              >
                 <select
                   value={copySourceId}
                   onChange={(e) => {
@@ -349,11 +409,11 @@ export default function TenderCostingClient({
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
                 >
                   <option value="">Select SN to copy</option>
-                  {copyOptions.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      SN {item.sn || item.id} - {item.description || 'Tender Item'}
-                    </option>
-                  ))}
+                    {copyOptions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        SN {item.sn || item.id} - {item.description || 'Tender Item'}
+                      </option>
+                    ))}
                 </select>
               </Field>
 
@@ -370,6 +430,28 @@ export default function TenderCostingClient({
             {copyMessage && (
               <p className="mt-3 text-sm text-slate-700">{copyMessage}</p>
             )}
+
+            {isVariationBoq ? (
+              <div className="mt-4 max-w-xs">
+                <Field label="Pro-rata Factor">
+                  <NumberInput
+                    value={costing.proRataFactor ?? 1}
+                    onChange={(nextValue) =>
+                      setCosting((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              proRataFactor:
+                                nextValue === '' ? 1 : Number(nextValue || 1),
+                            }
+                          : prev
+                      )
+                    }
+                    placeholder="Factor"
+                  />
+                </Field>
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -384,6 +466,8 @@ export default function TenderCostingClient({
         title="Material"
         values={costing.material}
         masterItems={masterItems}
+        editableRate={isVariationBoq}
+        proRataFactor={costing.proRataFactor ?? 1}
         onChange={(index, field, value) =>
           updateWastageSectionItem('material', index, field, value)
         }
@@ -394,6 +478,7 @@ export default function TenderCostingClient({
         title="Production Labour"
         value={costing.productionLabour}
         masterItems={masterItems}
+        proRataFactor={costing.proRataFactor ?? 1}
         onChange={(stage, field, value) =>
           updateProductionLabourSection(stage, field, value)
         }
@@ -403,6 +488,8 @@ export default function TenderCostingClient({
         title="Machining"
         values={costing.machining}
         masterItems={masterItems}
+        editableRate={isVariationBoq}
+        proRataFactor={costing.proRataFactor ?? 1}
         onChange={(index, field, value) =>
           updateSimpleSectionItem('machining', index, field, value)
         }
@@ -413,6 +500,8 @@ export default function TenderCostingClient({
         title="Coating"
         values={costing.coating}
         masterItems={masterItems}
+        editableRate={isVariationBoq}
+        proRataFactor={costing.proRataFactor ?? 1}
         onChange={(index, field, value) =>
           updateSimpleSectionItem('coating', index, field, value)
         }
@@ -423,6 +512,8 @@ export default function TenderCostingClient({
         title="Consumable"
         values={costing.consumable}
         masterItems={masterItems}
+        editableRate={isVariationBoq}
+        proRataFactor={costing.proRataFactor ?? 1}
         onChange={(index, field, value) =>
           updateWastageSectionItem('consumable', index, field, value)
         }
@@ -433,6 +524,8 @@ export default function TenderCostingClient({
         title="Subcontract"
         values={costing.subcontract}
         masterItems={masterItems}
+        editableRate={isVariationBoq}
+        proRataFactor={costing.proRataFactor ?? 1}
         onChange={(index, field, value) =>
           updateSimpleSectionItem('subcontract', index, field, value)
         }
@@ -443,6 +536,7 @@ export default function TenderCostingClient({
         title="Installation Labour"
         value={costing.installationLabour}
         masterItems={masterItems}
+        proRataFactor={costing.proRataFactor ?? 1}
         onChange={(field, value) => updateInstallationLabourSection(field, value)}
       />
 
@@ -486,6 +580,7 @@ function cloneCostingForCurrentBoq(
     id: current.id,
     boqItemId: boqItem.id,
     tenderNumber: boqItem.tenderNumber,
+    proRataFactor: source.proRataFactor ?? current.proRataFactor ?? 1,
     material: source.material.map((item) => ({ ...item })),
     machining: source.machining.map((item) => ({ ...item })),
     coating: source.coating.map((item) => ({ ...item })),
@@ -545,6 +640,20 @@ function getPreviousRevisionNumber(
   )
 }
 
+function getLatestOriginalRevisionNumber(items: BoqItem[], tenderNumber: string) {
+  return (
+    [...new Set(
+      items
+        .filter(
+          (item) =>
+            item.tenderNumber === tenderNumber &&
+            !String(item.variationNumber || '').trim()
+        )
+        .map((item) => String(item.revisionNumber || '').trim())
+    )].sort(compareRevisionNumbers).at(-1) || ''
+  )
+}
+
 function compareRevisionNumbers(left: string, right: string) {
   const leftMatch = left.match(/\d+/g)
   const rightMatch = right.match(/\d+/g)
@@ -562,16 +671,60 @@ function getRevisionLabel(revisionNumber: string) {
   return revisionNumber ? revisionNumber : 'Current Revision'
 }
 
+function buildCostingReturnPath(
+  isVariationBoq: boolean,
+  searchParams: ReturnType<typeof useSearchParams>
+) {
+  if (!isVariationBoq) {
+    return '/estimation/costing'
+  }
+
+  const nextParams = new URLSearchParams()
+  const projectNumber = searchParams.get('projectNumber') || ''
+  const projectName = searchParams.get('projectName') || ''
+  const tenderNumber = searchParams.get('tenderNumber') || ''
+  const variationNumber = searchParams.get('variationNumber') || ''
+  const revisionNumber = searchParams.get('revisionNumber') || ''
+
+  if (projectNumber) {
+    nextParams.set('projectNumber', projectNumber)
+  }
+
+  if (projectName) {
+    nextParams.set('projectName', projectName)
+  }
+
+  if (tenderNumber) {
+    nextParams.set('tenderNumber', tenderNumber)
+  }
+
+  if (variationNumber) {
+    nextParams.set('variationNumber', variationNumber)
+  }
+
+  if (revisionNumber) {
+    nextParams.set('revisionNumber', revisionNumber)
+  }
+
+  return nextParams.toString()
+    ? `/contract/variation-costing?${nextParams.toString()}`
+    : '/contract/variation-costing'
+}
+
 function MultiWastageSection({
   title,
   values,
   masterItems,
+  editableRate = false,
+  proRataFactor = 1,
   onChange,
   onAdd,
 }: {
   title: string
   values: EstimateItemWithWastage[]
   masterItems: MasterListItem[]
+  editableRate?: boolean
+  proRataFactor?: number
   onChange: (
     index: number,
     field: keyof EstimateItemWithWastage,
@@ -579,7 +732,8 @@ function MultiWastageSection({
   ) => void
   onAdd: () => void
 }) {
-  const unitCost = getEstimateItemsWithWastageAmount(values, masterItems)
+  const unitCost =
+    getEstimateItemsWithWastageAmount(values, masterItems) * Number(proRataFactor || 1)
 
   return (
     <Section title={title} unitCost={unitCost}>
@@ -623,10 +777,20 @@ function MultiWastageSection({
                   value={quantityIncWastage ? formatQuantity(quantityIncWastage) : ''}
                 />
                 <ReadOnlyField label="Unit" value={masterItem?.unit || ''} />
-                <ReadOnlyField
-                  label="Rate"
-                  value={masterItem ? formatMoney(masterItem.rate) : ''}
-                />
+                {editableRate ? (
+                  <Field label="Rate">
+                    <NumberInput
+                      value={value.rate ?? masterItem?.rate ?? ''}
+                      onChange={(nextValue) => onChange(index, 'rate', nextValue)}
+                      placeholder="Rate"
+                    />
+                  </Field>
+                ) : (
+                  <ReadOnlyField
+                    label="Rate"
+                    value={masterItem ? formatMoney(masterItem.rate) : ''}
+                  />
+                )}
                 <ReadOnlyField
                   label="PO Ref #"
                   value={masterItem?.poRefNumber || ''}
@@ -658,16 +822,21 @@ function MultiSimpleSection({
   title,
   values,
   masterItems,
+  editableRate = false,
+  proRataFactor = 1,
   onChange,
   onAdd,
 }: {
   title: string
   values: EstimateItem[]
   masterItems: MasterListItem[]
+  editableRate?: boolean
+  proRataFactor?: number
   onChange: (index: number, field: keyof EstimateItem, value: string) => void
   onAdd: () => void
 }) {
-  const unitCost = getEstimateItemsAmount(values, masterItems)
+  const unitCost =
+    getEstimateItemsAmount(values, masterItems) * Number(proRataFactor || 1)
 
   return (
     <Section title={title} unitCost={unitCost}>
@@ -697,10 +866,20 @@ function MultiSimpleSection({
                   />
                 </Field>
                 <ReadOnlyField label="Unit" value={masterItem?.unit || ''} />
-                <ReadOnlyField
-                  label="Rate"
-                  value={masterItem ? formatMoney(masterItem.rate) : ''}
-                />
+                {editableRate ? (
+                  <Field label="Rate">
+                    <NumberInput
+                      value={value.rate ?? masterItem?.rate ?? ''}
+                      onChange={(nextValue) => onChange(index, 'rate', nextValue)}
+                      placeholder="Rate"
+                    />
+                  </Field>
+                ) : (
+                  <ReadOnlyField
+                    label="Rate"
+                    value={masterItem ? formatMoney(masterItem.rate) : ''}
+                  />
+                )}
                 <ReadOnlyField
                   label="PO Ref #"
                   value={masterItem?.poRefNumber || ''}
@@ -732,14 +911,17 @@ function LabourSection({
   title,
   value,
   masterItems,
+  proRataFactor = 1,
   onChange,
 }: {
   title: string
   value: ProductionLabourDetails
   masterItems: MasterListItem[]
+  proRataFactor?: number
   onChange: (stage: LabourStageName, field: keyof LabourHours, value: string) => void
 }) {
-  const unitCost = getProductionLabourUnitCost(value, masterItems)
+  const unitCost =
+    getProductionLabourUnitCost(value, masterItems) * Number(proRataFactor || 1)
 
   return (
     <Section title={title} unitCost={unitCost}>
@@ -787,14 +969,17 @@ function InstallationLabourSection({
   title,
   value,
   masterItems,
+  proRataFactor = 1,
   onChange,
 }: {
   title: string
   value: LabourHours
   masterItems: MasterListItem[]
+  proRataFactor?: number
   onChange: (field: keyof LabourHours, value: string) => void
 }) {
-  const unitCost = getInstallationLabourUnitCost(value, masterItems)
+  const unitCost =
+    getInstallationLabourUnitCost(value, masterItems) * Number(proRataFactor || 1)
 
   return (
     <Section title={title} unitCost={unitCost}>

@@ -13,9 +13,11 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
+from accounts.permissions import ApiRoleAccessPermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.roles import is_manager_or_admin
 from production.models import ProjectDetail
 from shared.company import get_company_from_request
 from shared.period_closing import ensure_request_dates_in_open_period
@@ -196,6 +198,7 @@ def get_project_boq_items(bomal_context):
         BoqItem.objects.filter(
             company=bomal_context['company'],
             tender_number=bomal_context['tender_number'],
+            variation_number='',
         )
         .select_related('costing')
         .prefetch_related('costing__estimate_lines__item', 'costing__labour_lines__item')
@@ -391,11 +394,11 @@ def build_bomal_report(bomal_context):
 
 
 class ClientDataAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
-        clients = ClientData.objects.filter(company=company)
+        clients = ClientData.objects.filter(company=company).prefetch_related('contacts')
         serializer = ClientDataSerializer(clients, many=True)
         return Response(serializer.data)
 
@@ -415,12 +418,12 @@ class ClientDataAPIView(APIView):
 
 
 class ClientDataDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def patch(self, request, pk):
         company = get_company_from_request(request)
         ensure_request_dates_in_open_period(request.data, company)
-        client = ClientData.objects.get(pk=pk, company=company)
+        client = ClientData.objects.prefetch_related('contacts').get(pk=pk, company=company)
         serializer = ClientDataSerializer(
             client,
             data=request.data,
@@ -433,11 +436,11 @@ class ClientDataDetailAPIView(APIView):
 
 
 class TenderLogAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
-        tenders = TenderLog.objects.select_related('client').filter(company=company)
+        tenders = TenderLog.objects.select_related('client', 'client_contact').prefetch_related('client__contacts').filter(company=company)
         serializer = TenderLogSerializer(tenders, many=True)
         return Response(serializer.data)
 
@@ -457,7 +460,7 @@ class TenderLogAPIView(APIView):
 
 
 class TenderLogDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def patch(self, request, pk):
         company = get_company_from_request(request)
@@ -475,7 +478,7 @@ class TenderLogDetailAPIView(APIView):
 
 
 class MasterListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -499,7 +502,7 @@ class MasterListAPIView(APIView):
 
 
 class MasterListDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def patch(self, request, pk):
         company = get_company_from_request(request)
@@ -522,7 +525,7 @@ class MasterListDetailAPIView(APIView):
 
 
 class ContractRevenueAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -558,7 +561,7 @@ class ContractRevenueAPIView(APIView):
 
 
 class ContractRevenueDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def patch(self, request, pk):
         company = get_company_from_request(request)
@@ -581,7 +584,7 @@ class ContractRevenueDetailAPIView(APIView):
 
 
 class ContractVariationLogAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -610,7 +613,7 @@ class ContractVariationLogAPIView(APIView):
 
 
 class ContractPaymentLogAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -639,7 +642,7 @@ class ContractPaymentLogAPIView(APIView):
 
 
 class BoqItemListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -649,7 +652,7 @@ class BoqItemListAPIView(APIView):
 
 
 class BoqItemBulkSaveAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -691,7 +694,7 @@ class BoqItemBulkSaveAPIView(APIView):
 
 
 class BoqItemImportAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
@@ -712,7 +715,7 @@ class BoqItemImportAPIView(APIView):
 
 
 class BoqItemDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def patch(self, request, pk):
         company = get_company_from_request(request)
@@ -730,7 +733,7 @@ class BoqItemDetailAPIView(APIView):
 
 
 class TenderCostingListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -746,7 +749,7 @@ class TenderCostingListAPIView(APIView):
 
 
 class TenderCostingDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request, boq_item_id):
         company = get_company_from_request(request)
@@ -775,7 +778,7 @@ class TenderCostingDetailAPIView(APIView):
 
 
 class CostingRevisionSnapshotAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -801,6 +804,7 @@ class CostingRevisionSnapshotAPIView(APIView):
             company=company,
             tender_number=data['tender_number'],
             revision_number=data['revision_number'],
+            variation_number=data['variation_number'],
             defaults={
                 'project_name': data['project_name'],
                 'status': CostingRevisionSnapshot.STATUS_SUBMITTED,
@@ -812,6 +816,7 @@ class CostingRevisionSnapshotAPIView(APIView):
 
         if not created:
             snapshot.project_name = data['project_name']
+            snapshot.variation_number = data['variation_number']
             snapshot.status = CostingRevisionSnapshot.STATUS_SUBMITTED
             snapshot.submitted_by = getattr(request.user, 'username', '') or ''
             snapshot.approved_by = ''
@@ -820,6 +825,7 @@ class CostingRevisionSnapshotAPIView(APIView):
             snapshot.save(
                 update_fields=[
                     'project_name',
+                    'variation_number',
                     'status',
                     'submitted_by',
                     'approved_by',
@@ -840,11 +846,11 @@ class CostingRevisionSnapshotAPIView(APIView):
 
 
 class CostingRevisionSnapshotApproveAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request, pk):
-        if getattr(request.user, 'role', '') != 'admin':
-            raise PermissionDenied('Only admin can approve costing revisions.')
+        if not is_manager_or_admin(getattr(request.user, 'role', '')):
+            raise PermissionDenied('Only manager or admin can approve costing revisions.')
 
         company = get_company_from_request(request)
         snapshot = CostingRevisionSnapshot.objects.get(pk=pk, company=company)
@@ -864,7 +870,7 @@ class CostingRevisionSnapshotApproveAPIView(APIView):
 
 
 class BomalReportAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -1041,6 +1047,7 @@ def rows_to_boq_items(sheet_rows):
                 'description': get_row_value(raw_row, column_map['itemDescription']),
                 'quantity': parse_number(get_row_value(raw_row, column_map['quantity'])),
                 'unit': get_row_value(raw_row, column_map['unit']),
+                'remarks': get_row_value(raw_row, column_map.get('remarks', -1)),
             }
         )
 
@@ -1076,6 +1083,7 @@ def get_column_map(headers, require_all=True):
         'itemDescription': {'itemdescription', 'description', 'desc'},
         'quantity': {'qty', 'quantity'},
         'unit': {'unit', 'uom'},
+        'remarks': {'remarks', 'remark'},
     }
     column_map = {}
 

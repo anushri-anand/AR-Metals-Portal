@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 
 type AssociatedCostItem = {
   line_number: number
@@ -164,13 +165,6 @@ export default function AssociatedCostActualIncurredCostClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Actual Incurred Cost</h1>
-        <p className="mt-2 text-slate-700">
-          View monthly actual incurred cost for associated cost items using amount without VAT.
-        </p>
-        <p className="mt-2 text-xs text-slate-500">
-          One row is created for each month-end between the start date and end date, and the
-          final row uses the entered end date.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -198,7 +192,9 @@ export default function AssociatedCostActualIncurredCostClient() {
               type="date"
               value={fromDate}
               onChange={(event) => setFromDate(event.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-slate-500"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                fromDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </label>
 
@@ -208,7 +204,9 @@ export default function AssociatedCostActualIncurredCostClient() {
               type="date"
               value={toDate}
               onChange={(event) => setToDate(event.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-slate-500"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                toDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </label>
 
@@ -250,9 +248,6 @@ export default function AssociatedCostActualIncurredCostClient() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900">Actual Incurred Cost Table</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Showing {filteredRows.length} {filteredRows.length === 1 ? 'row' : 'rows'}
-          </p>
         </div>
 
         <div className="max-h-[70vh] overflow-auto">
@@ -552,21 +547,7 @@ function formatQuantity(value: number) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) {
-    return '-'
-  }
-
-  const parsedDate = parseISODate(value)
-  if (!parsedDate) {
-    return value
-  }
-
-  return parsedDate.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  })
+  return formatDateDdMmmYy(value)
 }
 
 function HeaderCell({ children }: { children: React.ReactNode }) {

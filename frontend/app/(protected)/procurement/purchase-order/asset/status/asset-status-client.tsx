@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 
 type PurchaseItem = {
   line_number: number
@@ -93,18 +94,13 @@ export default function AssetStatusClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Asset Status</h1>
-        <p className="mt-2 text-slate-700">
-          Review each asset purchase-order line item as of a selected date, including the
-          depreciated value, remaining asset amount, and remaining depreciation period.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">As Of</h2>
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mt-4 max-w-sm">
-          <label className="space-y-2 text-sm font-medium text-slate-700">
-            <span>As Of Date</span>
+          <label className="text-sm font-medium text-slate-700">
+            <h1>As Of Date</h1>
             <input
               className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-slate-500"
               onChange={(event) => setAsOfDate(event.target.value)}
@@ -118,10 +114,6 @@ export default function AssetStatusClient() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900">Asset Status Table</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Showing {rows.length} {rows.length === 1 ? 'row' : 'rows'} as of{' '}
-            {formatDisplayDate(asOfDate)}
-          </p>
         </div>
 
         <div className="max-h-[70vh] overflow-auto">
@@ -363,16 +355,7 @@ function formatMoney(value: number) {
 }
 
 function formatDisplayDate(value: string | null) {
-  if (!value) {
-    return '-'
-  }
-
-  const parsed = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(parsed.getTime())) {
-    return value
-  }
-
-  return parsed.toLocaleDateString('en-GB')
+  return formatDateDdMmmYy(value)
 }
 
 function getTodayISODate() {

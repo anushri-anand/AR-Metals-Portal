@@ -22,6 +22,7 @@ from .models import (
     PcrReportSnapshot,
     PurchaseOrder,
     Vendor,
+    VendorContact,
 )
 
 
@@ -226,6 +227,7 @@ class PurchaseOrderLineItemSerializer(serializers.Serializer):
 
 class VendorSerializer(serializers.ModelSerializer):
     company = serializers.HiddenField(default=CurrentCompanyDefault())
+    contacts = serializers.SerializerMethodField()
 
     class Meta:
         model = Vendor
@@ -233,16 +235,150 @@ class VendorSerializer(serializers.ModelSerializer):
             'id',
             'company',
             'supplier_name',
+            'vendor_id',
+            'trn_no',
+            'po_box',
             'country',
             'city',
             'contact_person_name',
             'mobile_number',
+            'email',
             'company_telephone',
+            'contacts',
             'product_details',
             'review',
             'created_at',
         ]
         read_only_fields = ['id', 'created_at']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        contacts = list(instance.contacts.all())
+        primary_contact = contacts[0] if contacts else None
+
+        data['contact_person_name'] = (
+            primary_contact.name if primary_contact and primary_contact.name else instance.contact_person_name
+        )
+        data['mobile_number'] = (
+            primary_contact.mobile_number
+            if primary_contact and primary_contact.mobile_number
+            else instance.mobile_number
+        )
+        data['email'] = (
+            primary_contact.email if primary_contact and primary_contact.email else instance.email
+        )
+        data['contacts'] = [
+            {
+                'id': contact.id,
+                'name': contact.name,
+                'mobile_number': contact.mobile_number,
+                'email': contact.email,
+            }
+            for contact in contacts
+        ]
+        return data
+
+    def create(self, validated_data):
+        contacts_data = self.initial_data.get('contacts') or []
+        vendor = Vendor.objects.create(**validated_data)
+        self._replace_contacts(vendor, contacts_data)
+        self._sync_primary_contact_fields(vendor)
+        return vendor
+
+    def update(self, instance, validated_data):
+        contacts_data = self.initial_data.get('contacts', serializers.empty)
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+
+        instance.save()
+
+        if contacts_data is not serializers.empty:
+            self._replace_contacts(instance, contacts_data or [])
+        elif any(
+            key in self.initial_data
+            for key in ('contact_person_name', 'mobile_number', 'email')
+        ):
+            primary_contact = instance.contacts.order_by('id').first()
+            contact_payload = {
+                'name': self.initial_data.get('contact_person_name', ''),
+                'mobile_number': self.initial_data.get('mobile_number', ''),
+                'email': self.initial_data.get('email', ''),
+            }
+
+            if primary_contact:
+                primary_contact.name = str(contact_payload['name'] or '').strip()
+                primary_contact.mobile_number = str(contact_payload['mobile_number'] or '').strip()
+                primary_contact.email = str(contact_payload['email'] or '').strip()
+                primary_contact.save(update_fields=['name', 'mobile_number', 'email', 'updated_at'])
+            elif any(str(value or '').strip() for value in contact_payload.values()):
+                VendorContact.objects.create(
+                    vendor=instance,
+                    name=str(contact_payload['name'] or '').strip(),
+                    mobile_number=str(contact_payload['mobile_number'] or '').strip(),
+                    email=str(contact_payload['email'] or '').strip(),
+                )
+
+        self._sync_primary_contact_fields(instance)
+        return instance
+
+    def _replace_contacts(self, vendor, contacts_data):
+        vendor.contacts.all().delete()
+
+        normalized_contacts = []
+
+        for contact in contacts_data:
+            name = str(contact.get('name', '')).strip()
+            mobile_number = str(contact.get('mobile_number', '')).strip()
+            email = str(contact.get('email', '')).strip()
+
+            if not any([name, mobile_number, email]):
+                continue
+
+            normalized_contacts.append(
+                VendorContact(
+                    vendor=vendor,
+                    name=name,
+                    mobile_number=mobile_number,
+                    email=email,
+                )
+            )
+
+        if not normalized_contacts:
+            legacy_name = str(self.initial_data.get('contact_person_name', '')).strip()
+            legacy_mobile = str(self.initial_data.get('mobile_number', '')).strip()
+            legacy_email = str(self.initial_data.get('email', '')).strip()
+
+            if any([legacy_name, legacy_mobile, legacy_email]):
+                normalized_contacts.append(
+                    VendorContact(
+                        vendor=vendor,
+                        name=legacy_name,
+                        mobile_number=legacy_mobile,
+                        email=legacy_email,
+                    )
+                )
+
+        if normalized_contacts:
+            VendorContact.objects.bulk_create(normalized_contacts)
+
+    def _sync_primary_contact_fields(self, vendor):
+        primary_contact = vendor.contacts.order_by('id').first()
+        vendor.contact_person_name = primary_contact.name if primary_contact else ''
+        vendor.mobile_number = primary_contact.mobile_number if primary_contact else ''
+        vendor.email = primary_contact.email if primary_contact else ''
+        vendor.save(update_fields=['contact_person_name', 'mobile_number', 'email'])
+
+    def get_contacts(self, obj):
+        return [
+            {
+                'id': contact.id,
+                'name': contact.name,
+                'mobile_number': contact.mobile_number,
+                'email': contact.email,
+            }
+            for contact in obj.contacts.all()
+        ]
 
 
 class PurchaseOrderSerializer(serializers.ModelSerializer):

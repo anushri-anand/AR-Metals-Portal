@@ -7,24 +7,27 @@ import { fetchAPI } from '@/lib/api'
 import {
   COMPANY_CHANGE_EVENT,
   companyOptions,
+  getCompanySectionRoot,
   getStoredCompany,
   isCompanyScopedPath,
+  requiresSelectedCompany,
   setStoredCompany,
   type CompanyName,
 } from '@/lib/company'
 import {
   companyModuleNavigation,
   sharedNavigation,
-  type AppRole,
   type NavigationSection,
 } from '@/lib/navigation'
 import HeaderUser from '@/components/header-user'
 import BackButton from '@/components/back-button'
+import { type AppRole } from '@/lib/access'
 import {
   formatIndianInputValue,
   isCompleteNumericValue,
   stripIndianNumberFormatting,
 } from '@/lib/number-format'
+import ReportExportToolbar from '@/components/report-export-toolbar'
 
 type MeResponse = {
   id: number
@@ -69,8 +72,8 @@ export default function AppShell({
   }, [])
 
   useEffect(() => {
-    if (isCompanyScopedPath(pathname) && !selectedCompany) {
-      router.replace('/dashboard')
+    if (requiresSelectedCompany(pathname) && !selectedCompany) {
+      router.replace(getCompanySectionRoot(pathname) || '/dashboard')
     }
   }, [pathname, router, selectedCompany])
 
@@ -258,9 +261,7 @@ export default function AppShell({
 
   function isItemActive(item: { href: string; company?: CompanyName }) {
     const pathMatches =
-      pathname === item.href ||
-      (pathname.startsWith(`${item.href}/`) &&
-        !(item.href === '/estimation' && pathname.startsWith('/estimation/contract')))
+      pathname === item.href || pathname.startsWith(`${item.href}/`)
 
     return pathMatches && (!item.company || item.company === selectedCompany)
   }
@@ -270,7 +271,6 @@ export default function AppShell({
       <aside className="h-screen w-80 shrink-0 overflow-y-auto bg-slate-900 p-6 text-white">
         <div className="mb-8">
           <h1 className="text-2xl font-bold">AR Metals</h1>
-          <p className="mt-1 text-sm text-slate-300">Operations Portal</p>
           <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
               Active Company
@@ -348,7 +348,9 @@ export default function AppShell({
 
         <div className="min-w-0 overflow-x-hidden p-8">
           <BackButton />
+          <ReportExportToolbar pathname={pathname} />
           <div
+            data-export-root="true"
             key={
               isCompanyScopedPath(pathname)
                 ? `${pathname}:${selectedCompany || 'none'}`

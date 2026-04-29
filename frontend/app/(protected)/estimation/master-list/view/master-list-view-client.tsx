@@ -74,10 +74,6 @@ export default function MasterListViewClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Master List View</h1>
-        <p className="mt-2 text-slate-700">
-          Filter saved items by item description or PO Ref #. Rates can be
-          edited directly in the table.
-        </p>
         {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       </div>

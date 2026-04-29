@@ -95,9 +95,6 @@ export default function ClientSoaClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">SOA - Client</h1>
-        <p className="mt-2 text-slate-700">
-          Select a client to view open receivables as of today.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -107,7 +104,9 @@ export default function ClientSoaClient() {
             <select
               value={selectedClientName}
               onChange={(event) => setSelectedClientName(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedClientName ? 'text-black' : 'text-neutral-400'
+              }`}
               disabled={loading}
             >
               <option value="">

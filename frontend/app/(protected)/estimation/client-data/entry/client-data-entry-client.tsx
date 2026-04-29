@@ -1,11 +1,14 @@
 'use client'
 
-import { useState } from 'react'
-import { createClientData } from '@/lib/estimation-storage'
+import { useEffect, useState } from 'react'
+import { createClientData, getClientData } from '@/lib/estimation-storage'
+import { findNextDocumentNumber } from '@/lib/document-numbering'
 
 const initialForm = {
   clientName: '',
+  customerId: '',
   supplierTrnNo: '',
+  poBox: '',
   country: '',
   city: '',
   contactPerson: '',
@@ -19,6 +22,27 @@ export default function ClientDataEntryClient() {
   const [form, setForm] = useState(initialForm)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    async function loadDefaultCustomerId() {
+      try {
+        const clients = await getClientData()
+        const nextCustomerId = findNextDocumentNumber(
+          clients.map((client) => client.customerId),
+          'C'
+        )
+
+        setForm((prev) => ({
+          ...prev,
+          customerId: prev.customerId || nextCustomerId,
+        }))
+      } catch {
+        // Keep the form usable even if the default ID cannot be preloaded.
+      }
+    }
+
+    loadDefaultCustomerId()
+  }, [])
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -37,19 +61,40 @@ export default function ClientDataEntryClient() {
     setMessage('')
 
     try {
-      await createClientData({
+      const createdClient = await createClientData({
         clientName: form.clientName.trim(),
+        customerId: form.customerId.trim(),
         supplierTrnNo: form.supplierTrnNo.trim(),
+        poBox: form.poBox.trim(),
         country: form.country.trim(),
         city: form.city.trim(),
         contactPerson: form.contactPerson.trim(),
         mobileNumber: form.mobileNumber.trim(),
         companyTelNumber: form.companyTelNumber.trim(),
         email: form.email.trim(),
+        contacts:
+          form.contactPerson.trim() || form.mobileNumber.trim() || form.email.trim()
+            ? [
+                {
+                  name: form.contactPerson.trim(),
+                  mobileNumber: form.mobileNumber.trim(),
+                  email: form.email.trim(),
+                },
+              ]
+            : [],
         remarks: form.remarks.trim(),
       })
 
-      setForm(initialForm)
+      const clients = await getClientData()
+      const nextCustomerId = findNextDocumentNumber(
+        [...clients.map((client) => client.customerId), createdClient.customerId],
+        'C'
+      )
+
+      setForm({
+        ...initialForm,
+        customerId: nextCustomerId,
+      })
       setMessage('Client data saved.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save client data.')
@@ -60,9 +105,6 @@ export default function ClientDataEntryClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Client Data Entry</h1>
-        <p className="mt-2 text-slate-700">
-          Save client information for tender tracking.
-        </p>
       </div>
 
       <form
@@ -83,11 +125,39 @@ export default function ClientDataEntryClient() {
 
           <Field label="Client TRN No.">
             <input
+              type="text"
+              inputMode="numeric"
+              data-skip-indian-format="true"
               name="supplierTrnNo"
               value={form.supplierTrnNo}
               onChange={handleChange}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
               placeholder="Enter client TRN number"
+            />
+          </Field>
+
+          <Field label="Customer ID">
+            <input
+              type="text"
+              name="customerId"
+              value={form.customerId}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              placeholder="Enter customer ID"
+              required
+            />
+          </Field>
+
+          <Field label="PO Box">
+            <input
+              type="text"
+              inputMode="numeric"
+              data-skip-indian-format="true"
+              name="poBox"
+              value={form.poBox}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              placeholder="Enter PO Box"
             />
           </Field>
 

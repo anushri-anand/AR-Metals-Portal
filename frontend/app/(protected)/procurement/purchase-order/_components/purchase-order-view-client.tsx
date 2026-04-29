@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { hasRoleAccess } from '@/lib/access'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 import { openPurchaseOrderPreview } from '@/lib/purchase-order-preview'
 
 type PurchaseOrderStatus = 'draft' | 'submitted' | 'approved'
@@ -103,7 +105,7 @@ export default function PurchaseOrderViewClient({
     [orders]
   )
 
-  const isAdmin = userRole === 'admin'
+  const canApprove = hasRoleAccess(userRole, ['manager', 'admin'])
 
   function handlePreview(order: PurchaseOrderRecord) {
     openPurchaseOrderPreview({
@@ -185,10 +187,6 @@ export default function PurchaseOrderViewClient({
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
-        <p className="mt-2 text-slate-900">
-          Submitted purchase orders wait for admin approval. Approved purchase
-          orders stay here with PDF preview under the PO number file name.
-        </p>
         {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       </div>
@@ -199,7 +197,7 @@ export default function PurchaseOrderViewClient({
         </div>
       ) : null}
 
-      {!loading && isAdmin ? (
+      {!loading && canApprove ? (
         <OrderTableSection
           title="Submitted For Approval"
           emptyMessage="No submitted purchase orders are waiting for approval."
@@ -217,6 +215,7 @@ export default function PurchaseOrderViewClient({
           emptyMessage="No approved purchase orders found yet."
           orders={approvedOrders}
           onPreview={handlePreview}
+          exportScope
         />
       ) : null}
     </div>
@@ -231,6 +230,7 @@ function OrderTableSection({
   onAction,
   actionLabel = 'Approve',
   actionDisabledId,
+  exportScope = false,
 }: {
   title: string
   emptyMessage: string
@@ -239,9 +239,13 @@ function OrderTableSection({
   onAction?: (orderId: number) => void
   actionLabel?: string
   actionDisabledId?: number | null
+  exportScope?: boolean
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div
+      data-export-scope={exportScope ? 'true' : undefined}
+      className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+    >
       <div className="border-b border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
       </div>
@@ -345,8 +349,7 @@ function formatAmount(value: string | number) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) return '-'
-  return new Date(`${value}T00:00:00`).toLocaleDateString('en-GB')
+  return formatDateDdMmmYy(value)
 }
 
 function formatDateTime(value: string | null) {

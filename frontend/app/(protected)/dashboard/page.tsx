@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -12,11 +14,45 @@ import {
   YAxis,
 } from 'recharts'
 import { fetchAPI } from '@/lib/api'
+import { hasRoleAccess } from '@/lib/access'
 import { companyOptions, type CompanyName } from '@/lib/company'
+import {
+  ALL_VARIATIONS_VALUE,
+  compareVariationNumbers,
+  getVariationDisplayLabel,
+} from '@/lib/variation-number'
 
 type ProjectOption = {
   project_number: string
   project_name: string
+}
+
+type DashboardContractProjectItem = {
+  id: number | string
+  boq_sn?: string
+  package?: string
+  item_name: string
+  quantity?: string | number
+  unit?: string
+  estimated_mh?: string | number
+}
+
+type DashboardContractVariationOption = {
+  id: number | string
+  variation_number: string
+  items: DashboardContractProjectItem[]
+}
+
+type DashboardContractProjectOption = {
+  id: number | string
+  contract_id?: number | string
+  tender_number?: string
+  revision_number?: string
+  project_number: string
+  project_name: string
+  contract_po_ref?: string
+  items: DashboardContractProjectItem[]
+  variations?: DashboardContractVariationOption[]
 }
 
 type EmployeeOption = {
@@ -148,6 +184,7 @@ type SalaryActualIncurredCostRow = {
 type CompanyDashboardData = {
   company: CompanyName
   projectOptions: ProjectOption[]
+  contractProjectOptions: DashboardContractProjectOption[]
   timeAllocations: TimeAllocationLine[]
   approvedRows: DashboardRow[]
   costRows: DashboardRow[]
@@ -172,10 +209,41 @@ type CostBookingSummary = {
   labour: number
 }
 
+type MhComparisonStage = {
+  key: string
+  label: string
+  estimated_mh: string | number
+  actual_mh: string | number
+}
+
+type MhComparisonResponse = {
+  project_number: string
+  project_name: string
+  package: string
+  work_order: string
+  estimated_total_mh: string | number
+  actual_total_mh: string | number
+  stages: MhComparisonStage[]
+}
+
+type MeResponse = {
+  role: string
+}
+
+const ORIGINAL_CONTRACT_WORK_ORDER = 'OC'
+
 export default function DashboardPage() {
   const [selectedCompany, setSelectedCompany] = useState<CompanyName>('ARM')
   const [projectFilter, setProjectFilter] = useState('')
   const [yearFilter, setYearFilter] = useState('')
+  const [mhCompany, setMhCompany] = useState<CompanyName>('ARM')
+  const [mhProjectFilter, setMhProjectFilter] = useState('')
+  const [mhPackageFilter, setMhPackageFilter] = useState('')
+  const [mhWorkOrderFilter, setMhWorkOrderFilter] = useState(ALL_VARIATIONS_VALUE)
+  const [mhChart, setMhChart] = useState<MhComparisonResponse | null>(null)
+  const [mhLoading, setMhLoading] = useState(false)
+  const [mhError, setMhError] = useState('')
+  const [role, setRole] = useState('')
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([])
   const [companyData, setCompanyData] = useState<Record<CompanyName, CompanyDashboardData | null>>({
     ARM: null,
@@ -190,6 +258,15 @@ export default function DashboardPage() {
       setError('')
 
       try {
+        const me = (await fetchAPI('/accounts/me/')) as MeResponse
+        const nextRole = typeof me?.role === 'string' ? me.role : ''
+        setRole(nextRole)
+
+        if (!hasRoleAccess(nextRole, ['admin'])) {
+          setLoading(false)
+          return
+        }
+
         const [employees, ...companies] = await Promise.all([
           fetchAPI('/employees/options/'),
           ...companyOptions.map((company) => loadCompanyDashboardData(company)),
@@ -211,6 +288,7 @@ export default function DashboardPage() {
   }, [])
 
   const selectedCompanyData = companyData[selectedCompany]
+  const mhSelectedCompanyData = companyData[mhCompany]
 
   const projectOptions = useMemo(() => {
     return [...(selectedCompanyData?.projectOptions || [])].sort((left, right) =>
@@ -244,6 +322,69 @@ export default function DashboardPage() {
     [projectFilter, projectOptions]
   )
 
+  const mhProjectOptions = useMemo(
+    () =>
+      [...(mhSelectedCompanyData?.contractProjectOptions || [])].sort((left, right) =>
+        `${left.project_number} ${left.project_name}`.localeCompare(
+          `${right.project_number} ${right.project_name}`
+        )
+      ),
+    [mhSelectedCompanyData]
+  )
+
+  const mhSelectedProject = useMemo(
+    () =>
+      mhProjectOptions.find(
+        (project) => `${project.project_number}::${project.project_name}` === mhProjectFilter
+      ) || null,
+    [mhProjectFilter, mhProjectOptions]
+  )
+
+  const mhWorkOrderOptions = useMemo(() => {
+    if (!mhSelectedProject) {
+      return [{ value: ALL_VARIATIONS_VALUE, label: 'All' }]
+    }
+
+    return [
+      { value: ALL_VARIATIONS_VALUE, label: 'All' },
+      { value: ORIGINAL_CONTRACT_WORK_ORDER, label: 'OC' },
+      ...((mhSelectedProject.variations || [])
+        .slice()
+        .sort((left, right) =>
+          compareVariationNumbers(left.variation_number, right.variation_number)
+        )
+        .map((variation) => ({
+          value: variation.variation_number,
+          label: getVariationDisplayLabel(variation.variation_number),
+        })) || []),
+    ]
+  }, [mhSelectedProject])
+
+  const mhPackageOptions = useMemo(() => {
+    if (!mhSelectedProject) {
+      return []
+    }
+
+    const items =
+      mhWorkOrderFilter === ALL_VARIATIONS_VALUE
+        ? [
+            ...mhSelectedProject.items,
+            ...((mhSelectedProject.variations || []).flatMap((variation) => variation.items) ||
+              []),
+          ]
+        : mhWorkOrderFilter === ORIGINAL_CONTRACT_WORK_ORDER
+          ? mhSelectedProject.items
+          : (
+              (mhSelectedProject.variations || []).find(
+                (variation) => variation.variation_number === mhWorkOrderFilter
+              )?.items || []
+            )
+
+    return Array.from(
+      new Set(items.map((item) => item.package || '').filter(Boolean))
+    ).sort((left, right) => left.localeCompare(right))
+  }, [mhSelectedProject, mhWorkOrderFilter])
+
   const employeeCategoryMap = useMemo(
     () =>
       new Map(
@@ -270,6 +411,45 @@ export default function DashboardPage() {
     }
   }, [selectedCompany, selectedCompanyData, selectedProject, yearFilter])
 
+  useEffect(() => {
+    async function loadMhComparison() {
+      if (!role || !hasRoleAccess(role, ['admin'])) {
+        return
+      }
+
+      setMhLoading(true)
+      setMhError('')
+
+      try {
+        const params = new URLSearchParams()
+        if (mhSelectedProject) {
+          params.set('project_number', mhSelectedProject.project_number)
+          params.set('project_name', mhSelectedProject.project_name)
+        }
+        if (mhPackageFilter) {
+          params.set('package', mhPackageFilter)
+        }
+        params.set('work_order', mhWorkOrderFilter || ALL_VARIATIONS_VALUE)
+
+        const data = (await fetchCompanyAPI(
+          `/production/dashboard/estimated-vs-actual-mh/?${params.toString()}`,
+          mhCompany
+        )) as MhComparisonResponse
+
+        setMhChart(data)
+      } catch (err) {
+        setMhChart(null)
+        setMhError(
+          err instanceof Error ? err.message : 'Failed to load Estimated Vs Actual - MH data.'
+        )
+      } finally {
+        setMhLoading(false)
+      }
+    }
+
+    void loadMhComparison()
+  }, [mhCompany, mhPackageFilter, mhSelectedProject, mhWorkOrderFilter, role])
+
   const costBookingViews = useMemo(() => {
     return companyOptions.map((company) => ({
       company,
@@ -282,17 +462,43 @@ export default function DashboardPage() {
     }))
   }, [companyData, employeeCategoryMap])
 
+  const mhChartRows = useMemo(
+    () =>
+      (mhChart?.stages || []).map((stage) => ({
+        ...stage,
+        estimatedMhValue: toNumber(stage.estimated_mh),
+        actualMhValue: toNumber(stage.actual_mh),
+      })),
+    [mhChart]
+  )
+
+  const hasMhData = useMemo(
+    () =>
+      mhChartRows.some(
+        (row) => row.estimatedMhValue > 0 || row.actualMhValue > 0
+      ),
+    [mhChartRows]
+  )
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p className="mt-2 text-slate-700">
-          Review cumulative approved amount, cumulative monthly cost, and cost booking for ARM and
-          AKR.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
+      {!loading && !hasRoleAccess(role, ['admin']) ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-900">Welcome</h2>
+          <p className="mt-3 text-slate-700">
+            Your role-specific modules are available from the sidebar. The full dashboard is
+            reserved for Admin users.
+          </p>
+        </div>
+      ) : null}
+
+      {!hasRoleAccess(role, ['admin']) ? null : (
+        <>
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-slate-900">Filters</h2>
@@ -369,9 +575,6 @@ export default function DashboardPage() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 p-6">
           <h2 className="text-xl font-semibold text-slate-900">Revenue Vs Cost Analysis</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            {selectedCompany} cumulative approved amount vs cumulative monthly cost
-          </p>
         </div>
 
         <div className="h-[360px] p-4">
@@ -429,11 +632,164 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 p-6">
+          <h2 className="text-xl font-semibold text-slate-900">Estimated Vs Actual - MH</h2>
+        </div>
+
+        <div className="border-b border-slate-200 p-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              <span>Company</span>
+              <select
+                value={mhCompany}
+                onChange={(event) => {
+                  setMhCompany(event.target.value as CompanyName)
+                  setMhProjectFilter('')
+                  setMhPackageFilter('')
+                  setMhWorkOrderFilter(ALL_VARIATIONS_VALUE)
+                }}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-slate-500"
+              >
+                {companyOptions.map((company) => (
+                  <option key={company} value={company}>
+                    {company}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              <span>Project Name/#</span>
+              <select
+                value={mhProjectFilter}
+                onChange={(event) => {
+                  setMhProjectFilter(event.target.value)
+                  setMhPackageFilter('')
+                  setMhWorkOrderFilter(ALL_VARIATIONS_VALUE)
+                }}
+                className={`w-full rounded-xl border border-slate-300 bg-white px-4 py-3 ${
+                  mhProjectFilter ? 'text-black' : 'text-neutral-400'
+                } outline-none transition focus:border-slate-500`}
+              >
+                <option value="">All Projects</option>
+                {mhProjectOptions.map((project) => (
+                  <option
+                    key={`${project.project_number}::${project.project_name}`}
+                    value={`${project.project_number}::${project.project_name}`}
+                  >
+                    {project.project_number} | {project.project_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              <span>Package</span>
+              <select
+                value={mhPackageFilter}
+                onChange={(event) => setMhPackageFilter(event.target.value)}
+                className={`w-full rounded-xl border border-slate-300 bg-white px-4 py-3 ${
+                  mhPackageFilter ? 'text-black' : 'text-neutral-400'
+                } outline-none transition focus:border-slate-500`}
+                disabled={!mhSelectedProject}
+              >
+                <option value="">All Packages</option>
+                {mhPackageOptions.map((packageValue) => (
+                  <option key={packageValue} value={packageValue}>
+                    {packageValue}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              <span>Work Order</span>
+              <select
+                value={mhWorkOrderFilter}
+                onChange={(event) => {
+                  setMhWorkOrderFilter(event.target.value)
+                  setMhPackageFilter('')
+                }}
+                className={`w-full rounded-xl border border-slate-300 bg-white px-4 py-3 ${
+                  mhWorkOrderFilter ? 'text-black' : 'text-neutral-400'
+                } outline-none transition focus:border-slate-500`}
+                disabled={!mhSelectedProject}
+              >
+                {mhWorkOrderOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {mhError ? <p className="mt-4 text-sm text-red-700">{mhError}</p> : null}
+        </div>
+
+        <div className="p-6">
+          <div className="mb-4 flex flex-wrap gap-6 text-sm text-slate-700">
+            <div>
+              <span className="font-semibold text-slate-900">Estimated MH:</span>{' '}
+              {formatMh(toNumber(mhChart?.estimated_total_mh))}
+            </div>
+            <div>
+              <span className="font-semibold text-slate-900">Actual MH:</span>{' '}
+              {formatMh(toNumber(mhChart?.actual_total_mh))}
+            </div>
+          </div>
+
+          <div className="h-[380px]">
+            {mhLoading ? (
+              <div className="flex h-full items-center justify-center text-sm text-slate-700">
+                Loading chart...
+              </div>
+            ) : hasMhData ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={mhChartRows}
+                  margin={{ top: 16, right: 16, bottom: 16, left: 8 }}
+                  barCategoryGap={24}
+                >
+                  <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <XAxis dataKey="label" tick={{ fill: '#0f172a', fontSize: 12 }} />
+                  <YAxis
+                    tick={{ fill: '#0f172a', fontSize: 12 }}
+                    tickFormatter={(value) => formatMh(Number(value))}
+                  />
+                  <Tooltip
+                    formatter={(value, name) => [
+                      formatMh(Number(value || 0)),
+                      name === 'estimatedMhValue' ? 'Estimated MH' : 'Actual MH',
+                    ]}
+                  />
+                  <Legend />
+                  <Bar
+                    dataKey="estimatedMhValue"
+                    name="Estimated MH"
+                    fill="#1d4ed8"
+                    radius={[6, 6, 0, 0]}
+                  />
+                  <Bar
+                    dataKey="actualMhValue"
+                    name="Actual MH"
+                    fill="#f97316"
+                    radius={[6, 6, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-700">
+                No MH data found for the selected filters.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h2 className="text-xl font-semibold text-slate-900">Human Resources</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Distinct employees booked through time allocation, split by Staff and Labour.
-        </p>
 
         <div className="mt-8 grid gap-6 md:grid-cols-2">
           {costBookingViews.map((view) => (
@@ -448,6 +804,8 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 }
@@ -465,7 +823,7 @@ function BookingCard({ label, value }: { label: string; value: number }) {
 
 async function loadCompanyDashboardData(company: CompanyName): Promise<CompanyDashboardData> {
   const [
-    projectOptions,
+    contractProjectOptions,
     procurementPayments,
     projectPurchaseOrders,
     assetPurchaseOrders,
@@ -476,7 +834,7 @@ async function loadCompanyDashboardData(company: CompanyName): Promise<CompanyDa
     salaryActualRows,
     timeAllocations,
   ] = await Promise.all([
-    fetchCompanyAPI('/production/project-details/options/', company),
+    fetchCompanyAPI('/production/contract-options/', company),
     fetchCompanyAPI('/procurement/payment/', company),
     fetchCompanyAPI('/procurement/purchase-order/?order_type=project', company),
     fetchCompanyAPI('/procurement/purchase-order/?order_type=asset', company),
@@ -488,7 +846,8 @@ async function loadCompanyDashboardData(company: CompanyName): Promise<CompanyDa
     fetchCompanyAPI('/production/time-allocation/', company).catch(() => []),
   ])
 
-  const typedProjectOptions = ensureArray<ProjectOption>(projectOptions)
+  const typedContractProjectOptions =
+    ensureArray<DashboardContractProjectOption>(contractProjectOptions)
   const typedProcurementPayments = ensureArray<ProcurementPaymentRecord>(procurementPayments)
   const typedProjectPurchaseOrders = ensureArray<PurchaseOrderRecord>(projectPurchaseOrders)
   const typedAssetPurchaseOrders = ensureArray<PurchaseOrderRecord>(assetPurchaseOrders)
@@ -522,10 +881,11 @@ async function loadCompanyDashboardData(company: CompanyName): Promise<CompanyDa
 
   return {
     company,
-    projectOptions: typedProjectOptions.map((project) => ({
+    projectOptions: typedContractProjectOptions.map((project) => ({
       project_number: String(project.project_number || ''),
       project_name: String(project.project_name || ''),
     })),
+    contractProjectOptions: typedContractProjectOptions,
     timeAllocations: typedTimeAllocations.map((line) => ({
       date: String(line.date || ''),
       employee_id: String(line.employee_id || ''),
@@ -1110,6 +1470,13 @@ function formatCompactAmount(value: number) {
   return value.toLocaleString('en-US', {
     notation: 'compact',
     maximumFractionDigits: 1,
+  })
+}
+
+function formatMh(value: number) {
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   })
 }
 

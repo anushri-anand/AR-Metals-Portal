@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { hasRoleAccess } from '@/lib/access'
 import {
   formatMoney,
   getContractRevenues,
@@ -133,6 +134,7 @@ type BurSummary = {
 
 type BurReport = {
   periods: PeriodMeta[]
+  actualPeriods: PeriodMeta[]
   rows: BurRow[]
   summary: BurSummary
   asOfLabel: string
@@ -324,9 +326,6 @@ export default function BurClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">BUR REPORT</h1>
-        <p className="mt-2 text-slate-700">
-          Review budget updates against approved PCR data for the selected quarter.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -380,7 +379,7 @@ export default function BurClient() {
               >
                 {saving ? 'Submitting...' : 'Submit'}
               </button>
-              {role === 'admin' && matchingSnapshot ? (
+              {hasRoleAccess(role, ['manager', 'admin']) && matchingSnapshot ? (
                 <>
                   <button
                     type="button"
@@ -476,7 +475,7 @@ export default function BurClient() {
                       </button>
                     </BodyCell>
                     <BodyCell>
-                      {role === 'admin' ? (
+                      {hasRoleAccess(role, ['manager', 'admin']) ? (
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -561,8 +560,14 @@ function BurReportSection({
     reviewedAt: string | null
   }
 }) {
-  const blankCellsBeforeForecastGrossProfit = 12 + report.periods.length * 6
-  const totalColumnCount = 17 + report.periods.length * 8
+  const actualPeriods =
+    report.actualPeriods?.length
+      ? report.actualPeriods
+      : report.periods.filter((period) => period.kind === 'quarter')
+  const blankCellsBeforeForecastGrossProfit =
+    12 + report.periods.length * 4 + actualPeriods.length * 2
+  const totalColumnCount =
+    17 + report.periods.length * 5 + actualPeriods.length * 3
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -610,13 +615,13 @@ function BurReportSection({
                 <HeaderCell colSpan={3}>Budget</HeaderCell>
                 <HeaderCell colSpan={2}>Actual Cost</HeaderCell>
                 <HeaderCell colSpan={report.periods.length}>Cumulative Forecast Completion %</HeaderCell>
-                <HeaderCell colSpan={report.periods.length}>Quarterly Forecast Completion %</HeaderCell>
+                <HeaderCell colSpan={report.periods.length}>Forecast Completion %</HeaderCell>
                 <HeaderCell colSpan={report.periods.length}>Forecast Cost</HeaderCell>
-                <HeaderCell colSpan={report.periods.length + 1}>Actual Cost</HeaderCell>
+                <HeaderCell colSpan={actualPeriods.length + 1}>Actual Cost</HeaderCell>
                 <HeaderCell colSpan={report.periods.length}>Forecast Revenue</HeaderCell>
-                <HeaderCell colSpan={report.periods.length + 1}>Actual Revenue</HeaderCell>
+                <HeaderCell colSpan={actualPeriods.length + 1}>Actual Revenue</HeaderCell>
                 <HeaderCell colSpan={report.periods.length}>Forecast Gross Profit</HeaderCell>
-                <HeaderCell colSpan={report.periods.length + 1}>Actual Gross Profit</HeaderCell>
+                <HeaderCell colSpan={actualPeriods.length + 1}>Actual Gross Profit</HeaderCell>
                 <HeaderCell colSpan={2}>Gross Profit</HeaderCell>
               </tr>
               <tr>
@@ -638,21 +643,21 @@ function BurReportSection({
                   <HeaderCell key={`fc-${period.key}`}>{period.label}</HeaderCell>
                 ))}
                 <HeaderCell>{report.previousYearLabel}</HeaderCell>
-                {report.periods.map((period) => (
+                {actualPeriods.map((period) => (
                   <HeaderCell key={`ac-${period.key}`}>{period.label}</HeaderCell>
                 ))}
                 {report.periods.map((period) => (
                   <HeaderCell key={`fr-${period.key}`}>{period.label}</HeaderCell>
                 ))}
                 <HeaderCell>{report.previousYearLabel}</HeaderCell>
-                {report.periods.map((period) => (
+                {actualPeriods.map((period) => (
                   <HeaderCell key={`ar-${period.key}`}>{period.label}</HeaderCell>
                 ))}
                 {report.periods.map((period) => (
                   <HeaderCell key={`fgp-${period.key}`}>{period.label}</HeaderCell>
                 ))}
                 <HeaderCell>{report.previousYearLabel}</HeaderCell>
-                {report.periods.map((period) => (
+                {actualPeriods.map((period) => (
                   <HeaderCell key={`agp-${period.key}`}>{period.label}</HeaderCell>
                 ))}
                 <HeaderCell>As Of Current Quarter</HeaderCell>
@@ -726,7 +731,7 @@ function BurReportSection({
                     <BodyCell align="right">
                       {formatMoney(row.actualCost[report.previousYearLabel])}
                     </BodyCell>
-                    {report.periods.map((period) => (
+                    {actualPeriods.map((period) => (
                       <BodyCell key={`ac-value-${row.key}-${period.key}`} align="right">
                         {formatMoney(row.actualCost[period.key])}
                       </BodyCell>
@@ -739,7 +744,7 @@ function BurReportSection({
                     <BodyCell align="right">
                       {formatMoney(row.actualRevenue[report.previousYearLabel])}
                     </BodyCell>
-                    {report.periods.map((period) => (
+                    {actualPeriods.map((period) => (
                       <BodyCell key={`ar-value-${row.key}-${period.key}`} align="right">
                         {formatMoney(row.actualRevenue[period.key])}
                       </BodyCell>
@@ -752,7 +757,7 @@ function BurReportSection({
                     <BodyCell align="right">
                       {formatMoney(row.actualGrossProfitAsOfPreviousYear)}
                     </BodyCell>
-                    {report.periods.map((period) => (
+                    {actualPeriods.map((period) => (
                       <BodyCell key={`agp-value-${row.key}-${period.key}`} align="right">
                         {formatMoney(row.actualGrossProfit[period.key])}
                       </BodyCell>
@@ -810,7 +815,7 @@ function BurReportSection({
                 <FooterCell align="right">
                   {formatMoney(report.summary.actualCost[report.previousYearLabel])}
                 </FooterCell>
-                {report.periods.map((period) => (
+                {actualPeriods.map((period) => (
                   <FooterCell key={`total-ac-${period.key}`} align="right">
                     {formatMoney(report.summary.actualCost[period.key])}
                   </FooterCell>
@@ -823,7 +828,7 @@ function BurReportSection({
                 <FooterCell align="right">
                   {formatMoney(report.summary.actualRevenue[report.previousYearLabel])}
                 </FooterCell>
-                {report.periods.map((period) => (
+                {actualPeriods.map((period) => (
                   <FooterCell key={`total-ar-${period.key}`} align="right">
                     {formatMoney(report.summary.actualRevenue[period.key])}
                   </FooterCell>
@@ -836,7 +841,7 @@ function BurReportSection({
                 <FooterCell align="right">
                   {formatMoney(report.summary.actualGrossProfit[report.previousYearLabel])}
                 </FooterCell>
-                {report.periods.map((period) => (
+                {actualPeriods.map((period) => (
                   <FooterCell key={`total-agp-${period.key}`} align="right">
                     {formatMoney(report.summary.actualGrossProfit[period.key])}
                   </FooterCell>
@@ -882,7 +887,7 @@ function BurReportSection({
                 <FooterCell align="right">
                   {formatMoney(report.summary.actualOh[report.previousYearLabel])}
                 </FooterCell>
-                {report.periods.map((period) => (
+                {actualPeriods.map((period) => (
                   <FooterCell key={`actual-oh-${period.key}`} align="right">
                     {formatMoney(report.summary.actualOh[period.key])}
                   </FooterCell>
@@ -905,7 +910,7 @@ function BurReportSection({
                 <FooterCell align="right">
                   {formatPercent(report.summary.actualOhPercent[report.previousYearLabel])}
                 </FooterCell>
-                {report.periods.map((period) => (
+                {actualPeriods.map((period) => (
                   <FooterCell key={`actual-oh-percent-${period.key}`} align="right">
                     {formatPercent(report.summary.actualOhPercent[period.key])}
                   </FooterCell>
@@ -928,7 +933,7 @@ function BurReportSection({
                 <FooterCell align="right">
                   {formatMoney(report.summary.actualNetProfit[report.previousYearLabel])}
                 </FooterCell>
-                {report.periods.map((period) => (
+                {actualPeriods.map((period) => (
                   <FooterCell key={`actual-net-profit-${period.key}`} align="right">
                     {formatMoney(report.summary.actualNetProfit[period.key])}
                   </FooterCell>
@@ -983,7 +988,14 @@ function buildBurReport(
     )
   )
 
-  const periods = buildPeriods(selectedYear, maxCompletionYear)
+  const periods = buildPeriods(selectedYear, Math.max(maxCompletionYear, selectedYear + 1))
+  const actualPeriods = quarterOrder.map((quarter) => ({
+    key: getQuarterPeriodKey(quarter, selectedYear),
+    label: getQuarterPeriodKey(quarter, selectedYear),
+    kind: 'quarter' as const,
+    year: selectedYear,
+    quarter,
+  }))
   const snapshotMap = buildSnapshotMap(pcrSnapshots)
   const tenderLocationMap = buildTenderLocationMap(tenderLogs)
   const selectedQuarterIndex = quarterOrder.indexOf(periodSelection.quarter)
@@ -1045,7 +1057,9 @@ function buildBurReport(
         (quarterlyForecastCompletion[period.key] / 100) * revisedContract
       forecastGrossProfit[period.key] =
         forecastRevenue[period.key] - forecastCost[period.key]
+    })
 
+    actualPeriods.forEach((period) => {
       const currentSnapshot = getSnapshotForPeriod(
         snapshotMap,
         snapshot.project_number,
@@ -1073,7 +1087,7 @@ function buildBurReport(
 
     const grossProfitAsOfCurrentQuarter =
       previousYearActualGrossProfit +
-      periods
+      actualPeriods
         .filter((period) => isPeriodWithinSelectedQuarter(period, selectedQuarterIndex))
         .reduce((total, period) => total + (actualGrossProfit[period.key] || 0), 0)
 
@@ -1108,6 +1122,7 @@ function buildBurReport(
   const summary = buildBurSummary(
     rows,
     periods,
+    actualPeriods,
     previousYearLabel,
     snapshotMap,
     periodSelection,
@@ -1116,6 +1131,7 @@ function buildBurReport(
 
   return {
     periods,
+    actualPeriods,
     rows,
     summary,
     asOfLabel: `${periodSelection.quarter}-${String(selectedYear).slice(-2)}`,
@@ -1130,6 +1146,7 @@ function buildBurReport(
 function buildBurSummary(
   rows: BurRow[],
   periods: PeriodMeta[],
+  actualPeriods: PeriodMeta[],
   previousYearLabel: string,
   snapshotMap: Map<string, PcrSnapshotRecord>,
   periodSelection: PeriodSelection,
@@ -1162,18 +1179,21 @@ function buildBurSummary(
 
   periods.forEach((period) => {
     summary.forecastCost[period.key] = 0
-    summary.actualCost[period.key] = 0
     summary.forecastRevenue[period.key] = 0
-    summary.actualRevenue[period.key] = 0
     summary.forecastGrossProfit[period.key] = 0
-    summary.actualGrossProfit[period.key] = 0
     summary.forecastOh[period.key] = normalizeAmountInput(
       ohInputs[getOhInputKey(periodSelection, period.key)]
     )
-    summary.actualOh[period.key] = 0
     summary.forecastOhPercent[period.key] = 0
-    summary.actualOhPercent[period.key] = 0
     summary.forecastNetProfit[period.key] = 0
+  })
+
+  actualPeriods.forEach((period) => {
+    summary.actualCost[period.key] = 0
+    summary.actualRevenue[period.key] = 0
+    summary.actualGrossProfit[period.key] = 0
+    summary.actualOh[period.key] = 0
+    summary.actualOhPercent[period.key] = 0
     summary.actualNetProfit[period.key] = 0
   })
 
@@ -1195,11 +1215,14 @@ function buildBurSummary(
 
     periods.forEach((period) => {
       summary.forecastCost[period.key] += row.forecastCost[period.key] || 0
-      summary.actualCost[period.key] += row.actualCost[period.key] || 0
       summary.forecastRevenue[period.key] += row.forecastRevenue[period.key] || 0
-      summary.actualRevenue[period.key] += row.actualRevenue[period.key] || 0
       summary.forecastGrossProfit[period.key] +=
         row.forecastGrossProfit[period.key] || 0
+    })
+
+    actualPeriods.forEach((period) => {
+      summary.actualCost[period.key] += row.actualCost[period.key] || 0
+      summary.actualRevenue[period.key] += row.actualRevenue[period.key] || 0
       summary.actualGrossProfit[period.key] += row.actualGrossProfit[period.key] || 0
     })
   })
@@ -1215,7 +1238,7 @@ function buildBurSummary(
 
     summary.actualOh[previousYearLabel] += getSnapshotCategoryActual(previousYearSnapshot, 'foh')
 
-    periods.forEach((period) => {
+    actualPeriods.forEach((period) => {
       const currentSnapshot = getSnapshotForPeriod(
         snapshotMap,
         row.projectNumber,
@@ -1245,10 +1268,13 @@ function buildBurSummary(
   periods.forEach((period) => {
     summary.forecastOhPercent[period.key] =
       safeRatio(summary.forecastOh[period.key], summary.forecastCost[period.key]) * 100
-    summary.actualOhPercent[period.key] =
-      safeRatio(summary.actualOh[period.key], summary.actualCost[period.key]) * 100
     summary.forecastNetProfit[period.key] =
       summary.forecastGrossProfit[period.key] - summary.forecastOh[period.key]
+  })
+
+  actualPeriods.forEach((period) => {
+    summary.actualOhPercent[period.key] =
+      safeRatio(summary.actualOh[period.key], summary.actualCost[period.key]) * 100
     summary.actualNetProfit[period.key] =
       summary.actualGrossProfit[period.key] - summary.actualOh[period.key]
   })

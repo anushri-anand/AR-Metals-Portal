@@ -1,12 +1,14 @@
 from django.urls import path
 
 from .views import (
+    DashboardEstimatedVsActualMhAPIView,
     DeliveryEntryAPIView,
     ProjectDetailEntryAPIView,
     ProjectDetailListAPIView,
     ProjectTenderOptionsAPIView,
     ProjectDetailUpdateAPIView,
     ProjectOptionsAPIView,
+    ProductionContractOptionsAPIView,
     ProductionStatusBreakdownAPIView,
     ProductionStatusSummaryAPIView,
     ProjectVariationAPIView,
@@ -17,6 +19,16 @@ from .views import (
 
 urlpatterns = [
     path('project-details/options/', ProjectOptionsAPIView.as_view(), name='project-options'),
+    path(
+        'contract-options/',
+        ProductionContractOptionsAPIView.as_view(),
+        name='production-contract-options',
+    ),
+    path(
+        'dashboard/estimated-vs-actual-mh/',
+        DashboardEstimatedVsActualMhAPIView.as_view(),
+        name='dashboard-estimated-vs-actual-mh',
+    ),
     path(
         'project-details/tender-options/',
         ProjectTenderOptionsAPIView.as_view(),

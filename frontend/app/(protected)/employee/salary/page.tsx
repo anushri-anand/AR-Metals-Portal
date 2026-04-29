@@ -11,6 +11,7 @@ export default function SalaryPage() {
           label: 'Actual Incurred Cost',
           href: '/employee/salary/actual-incurred-cost',
         },
+        { label: 'Salary Summary', href: '/employee/salary/summary' },
       ]}
     />
   )

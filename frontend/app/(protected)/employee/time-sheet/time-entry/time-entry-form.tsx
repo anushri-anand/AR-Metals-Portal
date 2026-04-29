@@ -17,6 +17,19 @@ type EmployeeHistoryRow = {
   is_current: boolean
 }
 
+type TimeEntryRecord = {
+  employee_id: string
+  employee_name: string
+  date: string
+  is_public_holiday: boolean
+  start_time: string | null
+  finish_time: string | null
+  regular_duty_hours: string | number
+  medical_leave_with_doc: boolean
+  medical_leave_without_doc: boolean
+  absent: boolean
+  remarks: string
+}
 
 type FormState = {
   employeeId: string
@@ -55,6 +68,8 @@ const timeOptions = Array.from({ length: 96 }, (_, index) => {
   
     return `${hourText}:${minuteText}`
   })
+
+const finishTimeOptions = [...timeOptions, '24:00']
   
 export default function TimeEntryForm() {
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([])
@@ -68,12 +83,17 @@ export default function TimeEntryForm() {
   useEffect(() => {
     async function loadEmployeeOptions() {
       try {
-        const [employeeData, holidayData] = await Promise.all([
+        const [employeeData, holidayData, latestEntries] = await Promise.all([
           fetchAPI('/employees/options/'),
           fetchAPI('/employees/time-sheet/public-holidays/'),
+          fetchAPI('/employees/time-sheet/entries/?limit=1'),
         ])
         setEmployeeOptions(employeeData)
         setPublicHolidayDates(Array.isArray(holidayData) ? holidayData : [])
+
+        if (Array.isArray(latestEntries) && latestEntries[0]) {
+          setForm(buildFormFromTimeEntry(latestEntries[0] as TimeEntryRecord))
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'Failed to load time entry options.'
@@ -118,6 +138,7 @@ export default function TimeEntryForm() {
     setForm((prev) => ({
       ...prev,
       isPublicHoliday: true,
+      regularDutyHours: getDefaultRegularDutyHours(form.date, true),
     }))
   }, [form.date, form.isPublicHoliday, publicHolidayDates])
   
@@ -129,8 +150,37 @@ export default function TimeEntryForm() {
     })
   }, [form.date])
 
+  const shouldForceZeroRegularDutyHours =
+    Boolean(form.date) && (form.isPublicHoliday || day === 'Sunday')
+
   const isLeaveOrAbsent =
     form.medicalLeaveWithDoc || form.medicalLeaveWithoutDoc || form.absent
+
+  const isPublicHolidayOnlyEntry = useMemo(() => {
+    return (
+      Boolean(form.date) &&
+      form.isPublicHoliday &&
+      !form.employeeId &&
+      !form.employeeName &&
+      !form.startTime &&
+      !form.finishTime &&
+      !form.medicalLeaveWithDoc &&
+      !form.medicalLeaveWithoutDoc &&
+      !form.absent &&
+      !form.remarks.trim()
+    )
+  }, [
+    form.absent,
+    form.date,
+    form.employeeId,
+    form.employeeName,
+    form.finishTime,
+    form.isPublicHoliday,
+    form.medicalLeaveWithDoc,
+    form.medicalLeaveWithoutDoc,
+    form.remarks,
+    form.startTime,
+  ])
 
   const totalTime = useMemo(() => {
     if (isLeaveOrAbsent) return 0
@@ -201,6 +251,18 @@ export default function TimeEntryForm() {
 
     if (type === 'checkbox') {
       const checked = (e.target as HTMLInputElement).checked
+
+      if (name === 'isPublicHoliday') {
+        setForm((prev) => ({
+          ...prev,
+          isPublicHoliday: checked,
+          regularDutyHours: prev.date
+            ? getDefaultRegularDutyHours(prev.date, checked)
+            : prev.regularDutyHours,
+        }))
+        return
+      }
+
       setForm((prev) => ({
         ...prev,
         [name]: checked,
@@ -254,7 +316,24 @@ export default function TimeEntryForm() {
     setLoading(true)
 
     try {
-      await fetchAPI('/employees/time-sheet/time-entry/', {
+      if (isPublicHolidayOnlyEntry) {
+        await fetchAPI('/employees/time-sheet/public-holidays/', {
+          method: 'POST',
+          body: JSON.stringify({
+            date: form.date,
+          }),
+        })
+
+        if (form.date) {
+          setPublicHolidayDates((prev) =>
+            prev.includes(form.date) ? prev : [...prev, form.date]
+          )
+        }
+        setMessage('Public holiday saved successfully.')
+        return
+      }
+
+      const savedEntry = await fetchAPI('/employees/time-sheet/time-entry/', {
         method: 'POST',
         body: JSON.stringify({
           employee_id: form.employeeId,
@@ -262,7 +341,9 @@ export default function TimeEntryForm() {
           is_public_holiday: form.isPublicHoliday,
           start_time: form.startTime || null,
           finish_time: form.finishTime || null,
-          regular_duty_hours: form.regularDutyHours,
+          regular_duty_hours: shouldForceZeroRegularDutyHours
+            ? '0'
+            : form.regularDutyHours,
           medical_leave_with_doc: form.medicalLeaveWithDoc,
           medical_leave_without_doc: form.medicalLeaveWithoutDoc,
           absent: form.absent,
@@ -275,7 +356,7 @@ export default function TimeEntryForm() {
           prev.includes(form.date) ? prev : [...prev, form.date]
         )
       }
-      setForm(initialForm)
+      setForm(buildFormFromTimeEntry(savedEntry as TimeEntryRecord))
       setMessage('Time entry saved successfully.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save time entry.')
@@ -288,9 +369,6 @@ export default function TimeEntryForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Time Entry</h1>
-        <p className="mt-2 text-slate-700">
-          Enter daily attendance, duty hours, overtime, and leave information.
-        </p>
       </div>
 
       <form
@@ -302,8 +380,10 @@ export default function TimeEntryForm() {
             <select
               value={form.employeeId}
               onChange={(e) => handleEmployeeIdChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-              required
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.employeeId ? 'text-black' : 'text-neutral-500'
+              }`}
+              required={!isPublicHolidayOnlyEntry}
             >
               <option value="">Select employee ID</option>
               {employeeOptions.map((employee) => (
@@ -318,8 +398,10 @@ export default function TimeEntryForm() {
             <select
               value={form.employeeName}
               onChange={(e) => handleEmployeeNameChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-              required
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.employeeName ? 'text-black' : 'text-neutral-500'
+              }`}
+              required={!isPublicHolidayOnlyEntry}
             >
               <option value="">Select employee name</option>
               {employeeOptions.map((employee) => (
@@ -338,13 +420,19 @@ export default function TimeEntryForm() {
                 value={form.date}
                 onChange={(e) => {
                   const nextDate = e.target.value
+                  const nextIsPublicHoliday = publicHolidayDates.includes(nextDate)
                   setForm((prev) => ({
                     ...prev,
                     date: nextDate,
-                    isPublicHoliday: publicHolidayDates.includes(nextDate),
+                    isPublicHoliday: nextIsPublicHoliday,
+                    regularDutyHours: nextDate
+                      ? getDefaultRegularDutyHours(nextDate, nextIsPublicHoliday)
+                      : prev.regularDutyHours,
                   }))
                 }}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                  form.date ? 'text-black' : 'text-neutral-500'
+                }`}
                 required
               />
 
@@ -379,7 +467,9 @@ export default function TimeEntryForm() {
                     }))
                     }
                     disabled={isLeaveOrAbsent}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 disabled:bg-slate-50"
+                    className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                      form.startTime ? 'text-black' : 'text-neutral-500'
+                    }`}
                 >
                     <option value="">Select start time</option>
                     {timeOptions.map((time) => (
@@ -401,10 +491,12 @@ export default function TimeEntryForm() {
                         }))
                     }
                     disabled={isLeaveOrAbsent}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 disabled:bg-slate-50"
+                    className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                      form.finishTime ? 'text-black' : 'text-neutral-500'
+                    }`}
                 >
                     <option value="">Select finish time</option>
-                    {timeOptions.map((time) => (
+                    {finishTimeOptions.map((time) => (
                         <option key={time} value={time}>
                           {time}
                         </option>
@@ -428,7 +520,7 @@ export default function TimeEntryForm() {
               name="regularDutyHours"
               value={form.regularDutyHours}
               onChange={handleChange}
-              disabled={isLeaveOrAbsent}
+              disabled={isLeaveOrAbsent || shouldForceZeroRegularDutyHours}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 disabled:bg-slate-50"
               required
             />
@@ -548,9 +640,59 @@ function timeToMinutes(value: string) {
   return hours * 60 + minutes
 }
 
+function normalizeTimeValue(value: string | null) {
+  if (!value) {
+    return ''
+  }
+
+  return value.slice(0, 5)
+}
+
+function buildFormFromTimeEntry(entry: TimeEntryRecord): FormState {
+  return {
+    employeeId: entry.employee_id || '',
+    employeeName: entry.employee_name || '',
+    date: entry.date || '',
+    isPublicHoliday: Boolean(entry.is_public_holiday),
+    startTime: normalizeTimeValue(entry.start_time),
+    finishTime: normalizeTimeValue(entry.finish_time),
+    regularDutyHours: String(entry.regular_duty_hours || '9'),
+    medicalLeaveWithDoc: Boolean(entry.medical_leave_with_doc),
+    medicalLeaveWithoutDoc: Boolean(entry.medical_leave_without_doc),
+    absent: Boolean(entry.absent),
+    remarks: entry.remarks || '',
+  }
+}
+
 function formatHours(value: number) {
   return value.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
+}
+
+function getDefaultRegularDutyHours(
+  dateValue: string,
+  isPublicHoliday: boolean
+) {
+  if (isPublicHoliday) {
+    return '0'
+  }
+
+  const selectedDay = new Date(`${dateValue}T00:00:00`).toLocaleDateString(
+    'en-US',
+    {
+      weekday: 'long',
+    }
+  )
+
+  if (selectedDay === 'Sunday') {
+    return '0'
+  }
+
+  if (selectedDay === 'Friday') {
+    return '9.5'
+  }
+
+  return '9'
 }

@@ -3,6 +3,7 @@ import {
   ContractPaymentLog,
   TenderLog,
 } from '@/lib/estimation-storage'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 
 export type SoaVendorRecord = {
   id: number
@@ -217,22 +218,7 @@ export function buildSupplierSoaRows({
 }
 
 export function formatSoaDate(value: string) {
-  if (!value) {
-    return '-'
-  }
-
-  const [yearText, monthText, dayText] = value.split('-')
-  const year = Number(yearText)
-  const month = Number(monthText) - 1
-  const day = Number(dayText)
-
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-    return '-'
-  }
-
-  const date = new Date(year, month, day)
-  const monthLabel = date.toLocaleString('en-US', { month: 'short' })
-  return `${String(day).padStart(2, '0')}.${monthLabel}.${String(year).slice(-2)}`
+  return formatDateDdMmmYy(value)
 }
 
 export function formatSoaMoney(value: number) {

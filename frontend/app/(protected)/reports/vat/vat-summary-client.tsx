@@ -146,13 +146,6 @@ export default function VatSummaryClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">VAT Summary</h1>
-        <p className="mt-2 text-slate-700">
-          Select the reporting period to review VAT on sales and purchases.
-        </p>
-        <p className="mt-2 text-xs text-slate-500">
-          Category links are ready now. We can plug in the detailed tables on those
-          pages once you send them.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -163,7 +156,9 @@ export default function VatSummaryClient() {
               type="date"
               value={fromDate}
               onChange={(event) => setFromDate(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                fromDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -172,7 +167,9 @@ export default function VatSummaryClient() {
               type="date"
               value={toDate}
               onChange={(event) => setToDate(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                toDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
         </div>

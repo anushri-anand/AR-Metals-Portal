@@ -1,6 +1,5 @@
 import { CompanyName } from '@/lib/company'
-
-export type AppRole = 'user_1' | 'user_2' | 'admin'
+import { type AppRole } from '@/lib/access'
 
 export type NavigationItem = {
   label: string
@@ -21,7 +20,7 @@ export const sharedNavigation: NavigationSection[] = [
       {
         label: 'Dashboard',
         href: '/dashboard',
-        roles: ['user_1', 'user_2', 'admin'],
+        roles: ['admin'],
       },
     ],
   },
@@ -31,22 +30,22 @@ export const sharedNavigation: NavigationSection[] = [
       {
         label: 'Personal Details',
         href: '/employee/personal-details',
-        roles: ['user_1', 'admin'],
+        roles: ['accountant', 'manager', 'admin'],
       },
       {
         label: 'Time Sheet',
         href: '/employee/time-sheet',
-        roles: ['user_1', 'admin'],
+        roles: ['accountant', 'manager', 'admin'],
       },
       {
         label: 'Salary',
         href: '/employee/salary',
-        roles: ['user_1', 'admin'],
+        roles: ['accountant', 'manager', 'admin'],
       },
       {
         label: 'Associated Cost',
         href: '/employee/associated-cost',
-        roles: ['user_1', 'admin'],
+        roles: ['accountant', 'manager', 'admin'],
       },
     ],
   },
@@ -56,26 +55,26 @@ export const companyModuleNavigation: NavigationItem[] = [
   {
     label: 'Estimation',
     href: '/estimation',
-    roles: ['user_1', 'admin'],
+    roles: ['production_assistant', 'estimator', 'manager', 'admin'],
   },
   {
     label: 'Contract',
-    href: '/estimation/contract',
-    roles: ['user_1', 'admin'],
+    href: '/contract',
+    roles: ['accountant', 'estimator', 'qs', 'manager', 'admin'],
   },
   {
     label: 'Production',
     href: '/production',
-    roles: ['user_2', 'admin'],
+    roles: ['production_assistant', 'manager', 'admin'],
   },
   {
     label: 'Procurement',
     href: '/procurement',
-    roles: ['user_1', 'admin'],
+    roles: ['accountant', 'manager', 'admin'],
   },
   {
     label: 'Reports',
     href: '/reports',
-    roles: ['user_1', 'admin'],
+    roles: ['accountant', 'manager', 'admin'],
   },
 ]

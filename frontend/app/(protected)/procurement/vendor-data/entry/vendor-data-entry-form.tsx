@@ -1,14 +1,19 @@
 'use client'
 
-import { useState } from 'react'
-import { fetchAPI } from '@/lib/api'
+import { useEffect, useState } from 'react'
+import { findNextDocumentNumber } from '@/lib/document-numbering'
+import { createVendorData, getVendorData } from '@/lib/vendor-data'
 
 type FormState = {
   supplierName: string
+  vendorId: string
+  trnNo: string
+  poBox: string
   country: string
   city: string
   contactPersonName: string
   mobileNumber: string
+  email: string
   companyTelephone: string
   productDetails: string
   review: string
@@ -16,10 +21,14 @@ type FormState = {
 
 const initialForm: FormState = {
   supplierName: '',
+  vendorId: '',
+  trnNo: '',
+  poBox: '',
   country: '',
   city: '',
   contactPersonName: '',
   mobileNumber: '',
+  email: '',
   companyTelephone: '',
   productDetails: '',
   review: '',
@@ -30,6 +39,27 @@ export default function VendorDataEntryForm() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    async function loadDefaultVendorId() {
+      try {
+        const vendors = await getVendorData()
+        const nextVendorId = findNextDocumentNumber(
+          vendors.map((vendor) => vendor.vendor_id),
+          'V'
+        )
+
+        setForm((prev) => ({
+          ...prev,
+          vendorId: prev.vendorId || nextVendorId,
+        }))
+      } catch {
+        // Keep the form usable even if the default ID cannot be preloaded.
+      }
+    }
+
+    loadDefaultVendorId()
+  }, [])
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -49,21 +79,41 @@ export default function VendorDataEntryForm() {
     setLoading(true)
 
     try {
-      await fetchAPI('/procurement/vendor-data/entry/', {
-        method: 'POST',
-        body: JSON.stringify({
-          supplier_name: form.supplierName,
-          country: form.country,
-          city: form.city,
-          contact_person_name: form.contactPersonName,
-          mobile_number: form.mobileNumber,
-          company_telephone: form.companyTelephone,
-          product_details: form.productDetails,
-          review: form.review,
-        }),
+      const createdVendor = await createVendorData({
+        supplier_name: form.supplierName,
+        vendor_id: form.vendorId,
+        trn_no: form.trnNo,
+        po_box: form.poBox,
+        country: form.country,
+        city: form.city,
+        contact_person_name: form.contactPersonName,
+        mobile_number: form.mobileNumber,
+        email: form.email,
+        company_telephone: form.companyTelephone,
+        product_details: form.productDetails,
+        review: form.review,
+        contacts:
+          form.contactPersonName || form.mobileNumber || form.email
+            ? [
+                {
+                  name: form.contactPersonName,
+                  mobile_number: form.mobileNumber,
+                  email: form.email,
+                },
+              ]
+            : [],
       })
 
-      setForm(initialForm)
+      const vendors = await getVendorData()
+      const nextVendorId = findNextDocumentNumber(
+        [...vendors.map((vendor) => vendor.vendor_id), createdVendor.vendor_id],
+        'V'
+      )
+
+      setForm({
+        ...initialForm,
+        vendorId: nextVendorId,
+      })
       setMessage('Vendor data saved successfully.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save vendor data.')
@@ -76,9 +126,6 @@ export default function VendorDataEntryForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Vendor Data Entry</h1>
-        <p className="mt-2 text-slate-700">
-          Enter supplier and contact information for procurement records.
-        </p>
       </div>
 
       <form
@@ -94,6 +141,44 @@ export default function VendorDataEntryForm() {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
               placeholder="Enter supplier name"
               required
+            />
+          </Field>
+
+          <Field label="Vendor ID">
+            <input
+              type="text"
+              name="vendorId"
+              value={form.vendorId}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              placeholder="Enter vendor ID"
+              required
+            />
+          </Field>
+
+          <Field label="TRN No.">
+            <input
+              type="text"
+              inputMode="numeric"
+              data-skip-indian-format="true"
+              name="trnNo"
+              value={form.trnNo}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              placeholder="Enter TRN number"
+            />
+          </Field>
+
+          <Field label="PO Box">
+            <input
+              type="text"
+              inputMode="numeric"
+              data-skip-indian-format="true"
+              name="poBox"
+              value={form.poBox}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              placeholder="Enter PO Box"
             />
           </Field>
 
@@ -137,6 +222,17 @@ export default function VendorDataEntryForm() {
               onChange={handleChange}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
               placeholder="Enter mobile number"
+            />
+          </Field>
+
+          <Field label="Email">
+            <input
+              name="email"
+              type="email"
+              value={form.email}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              placeholder="Enter email"
             />
           </Field>
 

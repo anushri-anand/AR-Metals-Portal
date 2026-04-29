@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 
 type AssetDepositRecord = {
   id: number
@@ -123,9 +124,6 @@ export default function AssetDepositsClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Asset Deposits</h1>
-        <p className="mt-2 text-slate-700">
-          Save asset deposit details and review all submitted entries below.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -208,7 +206,9 @@ export default function AssetDepositsClient() {
               name="modeOfPayment"
               value={form.modeOfPayment}
               onChange={handleInputChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.modeOfPayment ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select mode</option>
@@ -226,7 +226,9 @@ export default function AssetDepositsClient() {
               name="expiryDate"
               value={form.expiryDate}
               onChange={handleInputChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.expiryDate ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>
@@ -352,8 +354,7 @@ function BodyCell({
 }
 
 function formatDate(value: string) {
-  if (!value) return '-'
-  return new Date(`${value}T00:00:00`).toLocaleDateString('en-GB')
+  return formatDateDdMmmYy(value)
 }
 
 function formatMoney(value: string | number) {

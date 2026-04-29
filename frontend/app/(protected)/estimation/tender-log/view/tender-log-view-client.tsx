@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 import {
   TenderLog,
   formatMoney,
@@ -73,10 +74,6 @@ export default function TenderLogViewClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Tender Log View</h1>
-        <p className="mt-2 text-slate-700">
-          View tender log entries using the latest saved revision for each
-          tender.
-        </p>
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
         {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
       </div>
@@ -84,9 +81,6 @@ export default function TenderLogViewClient() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900">Summary</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Amount and count grouped by current tender status.
-          </p>
         </div>
         <div className="max-h-[45vh] w-full max-w-full overflow-auto">
           <table className="min-w-[760px] divide-y divide-slate-200 text-sm">
@@ -262,7 +256,5 @@ function buildSummaryRows(tenders: TenderLog[]) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) return '-'
-
-  return new Date(`${value}T00:00:00`).toLocaleDateString()
+  return formatDateDdMmmYy(value)
 }

@@ -1,6 +1,6 @@
 import { getStoredCompany, type CompanyName } from '@/lib/company'
 
-export type DocumentSeries = 'PO' | 'TEN' | 'QT' | 'PR' | 'INV' | 'GL' | 'ID'
+export type DocumentSeries = 'PO' | 'TEN' | 'QT' | 'PR' | 'INV' | 'GL' | 'ID' | 'V' | 'C'
 
 function getSelectedCompanyOrDefault() {
   return getStoredCompany() || 'ARM'

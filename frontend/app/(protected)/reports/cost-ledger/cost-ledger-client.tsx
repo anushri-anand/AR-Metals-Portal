@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import ProjectSelectFields from '@/components/project-select-fields'
 import { fetchAPI } from '@/lib/api'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 
 type ProjectSelection = {
   projectNumber: string
@@ -283,10 +284,6 @@ export default function CostLedgerClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Cost Ledger</h1>
-        <p className="mt-2 text-slate-700">
-          Review project-wise cost transactions from project PO, inventory PO, asset PO,
-          petty cash, and associated cost.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -305,7 +302,9 @@ export default function CostLedgerClient() {
               type="date"
               value={fromDate}
               onChange={(event) => setFromDate(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                fromDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -314,7 +313,9 @@ export default function CostLedgerClient() {
               type="date"
               value={toDate}
               onChange={(event) => setToDate(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                toDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
         </div>
@@ -790,17 +791,7 @@ function toNumber(value: string | number | undefined | null) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) return '-'
-
-  const parsed = parseISODate(value)
-  if (!parsed) return value
-
-  return parsed.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  })
+  return formatDateDdMmmYy(value)
 }
 
 function formatMoney(value: number) {

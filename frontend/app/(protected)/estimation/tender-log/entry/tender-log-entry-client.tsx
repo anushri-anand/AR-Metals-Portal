@@ -22,6 +22,7 @@ type TenderLogEntryForm = {
   revisionNumber: string
   revisionDate: string
   clientId: string
+  contactId: string
   projectName: string
   projectLocation: string
   geography: GeographyType
@@ -40,6 +41,7 @@ const initialForm: TenderLogEntryForm = {
   revisionNumber: 'R0',
   revisionDate: '',
   clientId: '',
+  contactId: '',
   projectName: '',
   projectLocation: '',
   geography: 'UAE',
@@ -99,14 +101,24 @@ export default function TenderLogEntryClient() {
     }))
   }
 
+  function handleClientChange(clientId: string) {
+    const client = getSelectedClient(clients, clientId)
+    const defaultContactId =
+      client?.contacts[0]?.id !== undefined ? String(client.contacts[0].id) : ''
+
+    setForm((prev) => ({
+      ...prev,
+      clientId,
+      contactId: defaultContactId,
+    }))
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setMessage('')
 
-    const selectedClient = getSelectedClient(clients, form.clientId)
-
-    if (!selectedClient?.contactPerson.trim()) {
+    if (!selectedContact?.name.trim()) {
       setError('Contact name is required in Client Data before saving tender.')
       return
     }
@@ -118,6 +130,7 @@ export default function TenderLogEntryClient() {
         revisionNumber: form.revisionNumber.trim(),
         revisionDate: form.revisionDate || null,
         clientId: form.clientId ? Number(form.clientId) : null,
+        contactId: form.contactId ? Number(form.contactId) : null,
         projectName: form.projectName.trim(),
         projectLocation: form.projectLocation.trim(),
         geography: form.geography,
@@ -146,14 +159,15 @@ export default function TenderLogEntryClient() {
   }
 
   const selectedClient = getSelectedClient(clients, form.clientId)
+  const selectedContact =
+    selectedClient?.contacts.find(
+      (contact) => String(contact.id) === String(form.contactId)
+    ) || selectedClient?.contacts[0] || null
 
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Tender Log Entry</h1>
-        <p className="mt-2 text-slate-700">
-          Save tender numbers here. Costing will use these tender numbers.
-        </p>
       </div>
 
       <form
@@ -188,7 +202,9 @@ export default function TenderLogEntryClient() {
               name="tenderDate"
               value={form.tenderDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.tenderDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -207,7 +223,9 @@ export default function TenderLogEntryClient() {
               name="revisionDate"
               value={form.revisionDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.revisionDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -215,8 +233,10 @@ export default function TenderLogEntryClient() {
             <select
               name="clientId"
               value={form.clientId}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              onChange={(event) => handleClientChange(event.target.value)}
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.clientId ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select client</option>
@@ -229,13 +249,29 @@ export default function TenderLogEntryClient() {
           </Field>
 
           <Field label="Contact Name">
-            <input
-              value={selectedClient?.contactPerson || ''}
-              className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-700"
-              placeholder="Auto-filled from client data"
-              readOnly
+            <select
+              name="contactId"
+              value={form.contactId}
+              onChange={handleChange}
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.contactId ? 'text-black' : 'text-neutral-400'
+              }`}
               required
-            />
+              disabled={!selectedClient || selectedClient.contacts.length === 0}
+            >
+              <option value="">
+                {selectedClient
+                  ? selectedClient.contacts.length > 0
+                    ? 'Select contact person'
+                    : 'No contact person saved'
+                  : 'Select client first'}
+              </option>
+              {selectedClient?.contacts.map((contact) => (
+                <option key={contact.id} value={contact.id}>
+                  {contact.name}
+                </option>
+              ))}
+            </select>
           </Field>
 
           <Field label="Project Name">
@@ -310,7 +346,9 @@ export default function TenderLogEntryClient() {
               name="submissionDate"
               value={form.submissionDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.submissionDate ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>

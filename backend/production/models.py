@@ -1,5 +1,6 @@
 from django.db import models
 
+from estimation.models import ContractRevenue
 from shared.company import COMPANY_CHOICES, COMPANY_DEFAULT
 
 
@@ -159,10 +160,19 @@ class TimeAllocationLine(models.Model):
 
 
 class WorkCompletionEntry(models.Model):
+    contract = models.ForeignKey(
+        ContractRevenue,
+        on_delete=models.SET_NULL,
+        related_name='work_completion_entries',
+        null=True,
+        blank=True,
+    )
     project = models.ForeignKey(
         ProjectDetail,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name='work_completion_entries',
+        null=True,
+        blank=True,
     )
     variation_number = models.CharField(
         max_length=100,
@@ -201,17 +211,33 @@ class WorkCompletionEntry(models.Model):
         db_table = 'production_status_work_completion_entry'
 
     def __str__(self):
+        project_number = (
+            self.contract.project_number
+            if self.contract_id
+            else self.project.project_number
+            if self.project_id
+            else 'Unknown Project'
+        )
         return (
-            f'{self.project.project_number} - {self.variation_number or "Base"} - '
+            f'{project_number} - {self.variation_number or "Base"} - '
             f'{self.package or self.item_name} - {self.date}'
         )
 
 
 class DeliveryEntry(models.Model):
+    contract = models.ForeignKey(
+        ContractRevenue,
+        on_delete=models.SET_NULL,
+        related_name='delivery_entries',
+        null=True,
+        blank=True,
+    )
     project = models.ForeignKey(
         ProjectDetail,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name='delivery_entries',
+        null=True,
+        blank=True,
     )
     variation_number = models.CharField(
         max_length=100,
@@ -243,7 +269,14 @@ class DeliveryEntry(models.Model):
         db_table = 'production_status_delivery_entry'
 
     def __str__(self):
+        project_number = (
+            self.contract.project_number
+            if self.contract_id
+            else self.project.project_number
+            if self.project_id
+            else 'Unknown Project'
+        )
         return (
-            f'{self.project.project_number} - {self.variation_number or "Base"} - '
+            f'{project_number} - {self.variation_number or "Base"} - '
             f'{self.package or self.item_name} - {self.delivery_note_number}'
         )

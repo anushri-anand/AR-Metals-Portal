@@ -269,9 +269,6 @@ export default function AssociatedCostPaymentForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Associated Cost Payment</h1>
-        <p className="mt-2 text-slate-700">
-          Save payment details against an associated cost SN.
-        </p>
       </div>
 
       <form
@@ -283,7 +280,9 @@ export default function AssociatedCostPaymentForm() {
             <select
               value={form.serialNumber}
               onChange={(e) => handleSerialNumberChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.serialNumber ? 'text-black' : 'text-neutral-400'
+              }`}
               required
               disabled={loadingOptions}
             >

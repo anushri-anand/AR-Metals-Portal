@@ -370,9 +370,6 @@ export default function AssociatedCostEntryForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Associated Cost Entry</h1>
-        <p className="mt-2 text-slate-700">
-          Choose labour or others, then enter the line-wise associated cost details.
-        </p>
       </div>
 
       <form
@@ -418,7 +415,9 @@ export default function AssociatedCostEntryForm() {
               name="supplierName"
               value={form.supplierName}
               onChange={handleTopLevelChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.supplierName ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select supplier name</option>
@@ -436,7 +435,9 @@ export default function AssociatedCostEntryForm() {
               name="date"
               value={form.date}
               onChange={handleTopLevelChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.date ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>
@@ -471,7 +472,9 @@ export default function AssociatedCostEntryForm() {
                           onChange={(e) =>
                             handleEmployeeNameChange(index, e.target.value)
                           }
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                          className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                            item.employeeName ? 'text-black' : 'text-neutral-400'
+                          }`}
                           required
                         >
                           <option value="">Select employee name</option>
@@ -489,7 +492,9 @@ export default function AssociatedCostEntryForm() {
                           onChange={(e) =>
                             handleEmployeeIdChange(index, e.target.value)
                           }
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                          className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                            item.employeeId ? 'text-black' : 'text-neutral-400'
+                          }`}
                           required
                         >
                           <option value="">Select employee ID</option>
@@ -512,7 +517,9 @@ export default function AssociatedCostEntryForm() {
                       disabled={
                         !item.costCode || !requiresManualAccountCode(item.costCode)
                       }
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 disabled:bg-slate-50 disabled:text-slate-500"
+                      className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                        item.accountCode ? 'text-black' : 'text-neutral-400'
+                      }`}
                     >
                       <option value="">
                         {item.costCode
@@ -535,7 +542,9 @@ export default function AssociatedCostEntryForm() {
                       onChange={(e) =>
                         handleItemChange(index, 'costCode', e.target.value)
                       }
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                      className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                        item.costCode ? 'text-black' : 'text-neutral-400'
+                      }`}
                       required
                     >
                       <option value="">Select cost code</option>
@@ -627,7 +636,9 @@ export default function AssociatedCostEntryForm() {
                       onChange={(e) =>
                         handleItemChange(index, 'startDate', e.target.value)
                       }
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                      className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                        item.startDate ? 'text-black' : 'text-neutral-400'
+                      }`}
                       required
                     />
                   </Field>
@@ -639,7 +650,9 @@ export default function AssociatedCostEntryForm() {
                       onChange={(e) =>
                         handleItemChange(index, 'endDate', e.target.value)
                       }
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                      className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                        item.endDate ? 'text-black' : 'text-neutral-400'
+                      }`}
                       required
                     />
                   </Field>

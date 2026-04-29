@@ -3,11 +3,16 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchAPI } from '@/lib/api'
+import { getDefaultPathForRole } from '@/lib/access'
 import { clearStoredCompany } from '@/lib/company'
 
 type LoginResponse = {
   access: string
   refresh: string
+}
+
+type MeResponse = {
+  role: string
 }
 
 export default function LoginForm() {
@@ -36,7 +41,8 @@ export default function LoginForm() {
       localStorage.setItem('refresh_token', data.refresh)
       clearStoredCompany()
 
-      router.replace('/dashboard')
+      const me = (await fetchAPI('/accounts/me/')) as MeResponse
+      router.replace(getDefaultPathForRole(me?.role))
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed.')
@@ -57,7 +63,7 @@ export default function LoginForm() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-black"
               required
             />
           </div>
@@ -68,7 +74,8 @@ export default function LoginForm() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-black"
+              style={{ color: '#000', WebkitTextFillColor: '#000' }}
               required
             />
           </div>

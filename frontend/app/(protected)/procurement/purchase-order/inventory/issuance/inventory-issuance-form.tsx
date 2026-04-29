@@ -196,9 +196,6 @@ export default function InventoryIssuanceForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Inventory Issuance Entry</h1>
-        <p className="mt-2 text-slate-700">
-          Issue procured inventory items to a project.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -211,7 +208,9 @@ export default function InventoryIssuanceForm() {
             <select
               value={supplierName}
               onChange={(event) => handleSupplierChange(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                supplierName ? 'text-black' : 'text-neutral-400'
+              }`}
               required
               disabled={loading}
             >
@@ -230,7 +229,9 @@ export default function InventoryIssuanceForm() {
             <select
               value={poNumber}
               onChange={(event) => handlePoChange(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                poNumber ? 'text-black' : 'text-neutral-400'
+              }`}
               required
               disabled={loading}
             >
@@ -249,7 +250,9 @@ export default function InventoryIssuanceForm() {
             <select
               value={lineNumber}
               onChange={(event) => setLineNumber(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                lineNumber ? 'text-black' : 'text-neutral-400'
+              }`}
               required
               disabled={!selectedPo}
             >
@@ -267,7 +270,9 @@ export default function InventoryIssuanceForm() {
               type="date"
               value={issuanceDate}
               onChange={(event) => setIssuanceDate(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                issuanceDate ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>

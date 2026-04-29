@@ -10,6 +10,11 @@ import {
   type ProductionProjectOption,
   updateProjectItemSelection,
 } from '@/lib/production-selection'
+import {
+  ALL_VARIATIONS_VALUE,
+  ALL_VARIATIONS_LABEL,
+  getVariationDisplayLabel,
+} from '@/lib/variation-number'
 
 type FormState = ProductionItemSelection & {
   date: string
@@ -77,7 +82,7 @@ export default function WorkCompletionForm() {
   useEffect(() => {
     async function loadProjects() {
       try {
-        const data = await fetchAPI('/production/project-details/options/')
+        const data = await fetchAPI('/production/contract-options/')
         setProjectOptions(data)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load projects.')
@@ -150,9 +155,6 @@ export default function WorkCompletionForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Work Completion</h1>
-        <p className="mt-2 text-slate-700">
-          Enter stage-wise work completion for project packages.
-        </p>
       </div>
 
       <form
@@ -166,7 +168,9 @@ export default function WorkCompletionForm() {
               name="date"
               value={form.date}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.date ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>
@@ -175,7 +179,9 @@ export default function WorkCompletionForm() {
             <select
               value={form.projectNumber}
               onChange={(e) => handleSelectionChange('projectNumber', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.projectNumber ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select project #</option>
@@ -196,10 +202,11 @@ export default function WorkCompletionForm() {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
               disabled={!form.projectNumber && !form.projectName}
             >
+              <option value={ALL_VARIATIONS_VALUE}>{ALL_VARIATIONS_LABEL}</option>
               <option value="">Base Project</option>
               {variationOptions.map((variation) => (
                 <option key={variation.id} value={variation.variation_number}>
-                  {variation.variation_number}
+                  {getVariationDisplayLabel(variation.variation_number)}
                 </option>
               ))}
             </select>
@@ -209,7 +216,9 @@ export default function WorkCompletionForm() {
             <select
               value={form.projectName}
               onChange={(e) => handleSelectionChange('projectName', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.projectName ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select project name</option>
@@ -225,14 +234,12 @@ export default function WorkCompletionForm() {
             <select
               value={form.package}
               onChange={(e) => handleSelectionChange('package', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-              disabled={
-                !form.projectNumber || Boolean(form.variationNumber) || packageOptions.length === 0
-              }
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.package ? 'text-black' : 'text-neutral-400'
+              }`}
+              disabled={!form.projectNumber || packageOptions.length === 0}
             >
-              <option value="">
-                {form.variationNumber ? 'Variation item - no package' : 'Select package'}
-              </option>
+              <option value="">Select package</option>
               {packageOptions.map((itemPackage) => (
                 <option key={itemPackage} value={itemPackage}>
                   {itemPackage}

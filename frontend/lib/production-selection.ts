@@ -1,3 +1,9 @@
+import {
+  ALL_VARIATIONS_VALUE,
+  compareVariationNumbers,
+  normalizeVariationNumber,
+} from '@/lib/variation-number'
+
 export type ProductionProjectItem = {
   id: number
   boq_sn: string
@@ -8,7 +14,8 @@ export type ProductionProjectItem = {
 }
 
 export type ProductionVariationItem = {
-  id: number
+  id: number | string
+  boq_sn?: string
   package?: string
   item_name: string
   quantity: string
@@ -16,7 +23,7 @@ export type ProductionVariationItem = {
 }
 
 export type ProductionVariationOption = {
-  id: number
+  id: number | string
   variation_number: string
   items: ProductionVariationItem[]
 }
@@ -55,7 +62,7 @@ export function getVariationOptions(
 ) {
   const project = getProjectForSelection(selection, projectOptions)
   return (project?.variations || []).slice().sort((left, right) =>
-    left.variation_number.localeCompare(right.variation_number)
+    compareVariationNumbers(left.variation_number, right.variation_number)
   )
 }
 
@@ -69,12 +76,23 @@ export function getItemOptions(
     return []
   }
 
+  if (selection.variationNumber === ALL_VARIATIONS_VALUE) {
+    return [
+      ...project.items,
+      ...(project.variations || []).flatMap((variation) => variation.items),
+    ].filter((item) => !selection.package || item.package === selection.package)
+  }
+
   if (selection.variationNumber) {
     const variation = (project.variations || []).find(
-      (item) => item.variation_number === selection.variationNumber
+      (item) =>
+        normalizeVariationNumber(item.variation_number) ===
+        normalizeVariationNumber(selection.variationNumber)
     )
 
-    return variation ? variation.items : []
+    return (variation ? variation.items : []).filter(
+      (item) => !selection.package || item.package === selection.package
+    )
   }
 
   return project.items.filter(
@@ -86,14 +104,30 @@ export function getPackageOptions(
   selection: ProductionItemSelection,
   projectOptions: ProductionProjectOption[]
 ) {
-  if (selection.variationNumber) {
-    return []
-  }
-
   const project = getProjectForSelection(selection, projectOptions)
 
+  const items =
+    selection.variationNumber === ALL_VARIATIONS_VALUE
+      ? [
+          ...(project?.items || []),
+          ...((project?.variations || []).flatMap((variation) => variation.items) || []),
+        ]
+      : selection.variationNumber
+        ? (
+            (project?.variations || []).find(
+              (variation) =>
+                normalizeVariationNumber(variation.variation_number) ===
+                normalizeVariationNumber(selection.variationNumber)
+            )?.items || []
+          )
+        : (project?.items || [])
+
   return Array.from(
-    new Set((project?.items || []).map((item) => item.package).filter(Boolean))
+    new Set(
+      items
+        .map((item) => item.package)
+        .filter((itemPackage): itemPackage is string => Boolean(itemPackage))
+    )
   ).sort((left, right) => left.localeCompare(right))
 }
 
@@ -110,8 +144,19 @@ export function getBoqSnOptions(
   selection: ProductionItemSelection,
   projectOptions: ProductionProjectOption[]
 ) {
-  if (selection.variationNumber || !selection.itemName) {
+  if (selection.variationNumber === ALL_VARIATIONS_VALUE || !selection.itemName) {
     return []
+  }
+
+  if (selection.variationNumber) {
+    return Array.from(
+      new Set(
+        getItemOptions(selection, projectOptions)
+          .filter((item) => item.item_name === selection.itemName)
+          .map((item) => item.boq_sn || '')
+          .filter(Boolean)
+      )
+    ).sort((left, right) => left.localeCompare(right))
   }
 
   const project = getProjectForSelection(selection, projectOptions)
@@ -134,9 +179,46 @@ export function getSelectedItem(
   selection: ProductionItemSelection,
   projectOptions: ProductionProjectOption[]
 ) {
-  if (selection.variationNumber) {
+  if (selection.variationNumber === ALL_VARIATIONS_VALUE) {
+    const allItems = getItemOptions(selection, projectOptions)
+
+    if (allItems.length === 0) {
+      return null
+    }
+
     if (!selection.itemName) {
-      const variationItems = getItemOptions(selection, projectOptions)
+      const units = Array.from(new Set(allItems.map((item) => item.unit).filter(Boolean)))
+      const quantity = allItems.reduce(
+        (total, item) => total + Number(item.quantity || 0),
+        0
+      )
+
+      return {
+        ...allItems[0],
+        item_name: '',
+        boq_sn: '',
+        quantity: String(quantity),
+        unit: units.length === 1 ? units[0] : 'Mixed',
+      }
+    }
+
+    if (!selection.boqSn) {
+      return allItems.find((item) => item.item_name === selection.itemName) || null
+    }
+
+    return (
+      allItems.find(
+        (item) =>
+          item.item_name === selection.itemName &&
+          (item.boq_sn || '') === selection.boqSn
+      ) || null
+    )
+  }
+
+  if (selection.variationNumber) {
+    const variationItems = getItemOptions(selection, projectOptions)
+
+    if (!selection.itemName) {
       if (variationItems.length === 0) {
         return null
       }
@@ -157,8 +239,10 @@ export function getSelectedItem(
     }
 
     return (
-      getItemOptions(selection, projectOptions).find(
-        (item) => item.item_name === selection.itemName
+      variationItems.find(
+        (item) =>
+          item.item_name === selection.itemName &&
+          (!selection.boqSn || (item.boq_sn || '') === selection.boqSn)
       ) || null
     )
   }
@@ -224,7 +308,7 @@ export function updateProjectItemSelection(
   if (field === 'variationNumber') {
     return {
       ...selection,
-      variationNumber: value,
+      variationNumber: normalizeVariationNumber(value),
       package: '',
       itemName: '',
       boqSn: '',

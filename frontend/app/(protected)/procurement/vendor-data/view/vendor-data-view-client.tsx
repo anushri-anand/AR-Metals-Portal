@@ -1,31 +1,28 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { fetchAPI } from '@/lib/api'
+import { VendorData, getVendorData } from '@/lib/vendor-data'
 
-type VendorRecord = {
-  id: number
-  supplier_name: string
-  country: string
-  city: string
-  contact_person_name: string
-  mobile_number: string
-  company_telephone: string
-  product_details: string
-  review: string
+function getContactKey(
+  contact: { id?: string | number | null },
+  index: number,
+  field: string
+) {
+  return contact.id
+    ? `vendor-contact-${field}-${contact.id}-${index}`
+    : `vendor-contact-${field}-new-${index}`
 }
 
 export default function VendorDataViewClient() {
-  const [vendors, setVendors] = useState<VendorRecord[]>([])
-  const [selectedSupplier, setSelectedSupplier] = useState('')
+  const [vendors, setVendors] = useState<VendorData[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
     async function loadVendors() {
       try {
-        const data = await fetchAPI('/procurement/vendor-data/')
-        setVendors(Array.isArray(data) ? data : [])
+        setVendors(await getVendorData())
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'Failed to load vendor data.'
@@ -39,40 +36,36 @@ export default function VendorDataViewClient() {
   }, [])
 
   const visibleVendors = useMemo(
-    () =>
-      selectedSupplier
-        ? vendors.filter((vendor) => vendor.supplier_name === selectedSupplier)
-        : vendors,
-    [selectedSupplier, vendors]
+    () => {
+      const normalizedQuery = searchQuery.trim().toLowerCase()
+
+      if (!normalizedQuery) {
+        return vendors
+      }
+
+      return vendors.filter((vendor) =>
+        vendor.supplier_name.toLowerCase().includes(normalizedQuery)
+      )
+    },
+    [searchQuery, vendors]
   )
 
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Vendor Data View</h1>
-        <p className="mt-2 text-slate-700">
-          Review all saved vendor details, or pick a supplier name to narrow the table.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <Field label="Supplier Name">
-          <select
-            value={selectedSupplier}
-            onChange={(e) => setSelectedSupplier(e.target.value)}
+        <Field label="Search Supplier Name">
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+            placeholder="Type supplier name"
             disabled={loading}
-          >
-            <option value="">
-              {loading ? 'Loading vendors...' : 'All suppliers'}
-            </option>
-            {vendors.map((vendor) => (
-              <option key={vendor.id} value={vendor.supplier_name}>
-                {vendor.supplier_name}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
       </div>
 
@@ -85,11 +78,15 @@ export default function VendorDataViewClient() {
             <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-700">
               <tr>
                 <HeaderCell>Name of Supplier</HeaderCell>
+                <HeaderCell>Vendor ID</HeaderCell>
+                <HeaderCell>TRN No.</HeaderCell>
+                <HeaderCell>PO Box</HeaderCell>
                 <HeaderCell>Country</HeaderCell>
                 <HeaderCell>City</HeaderCell>
                 <HeaderCell>Name of Contact Person</HeaderCell>
                 <HeaderCell>Mobile #</HeaderCell>
                 <HeaderCell>Company Tel #</HeaderCell>
+                <HeaderCell>Email</HeaderCell>
                 <HeaderCell>Product Details</HeaderCell>
                 <HeaderCell>Review</HeaderCell>
               </tr>
@@ -99,21 +96,63 @@ export default function VendorDataViewClient() {
                 visibleVendors.map((vendor) => (
                   <tr key={vendor.id} className="border-b border-slate-200">
                     <BodyCell>{vendor.supplier_name}</BodyCell>
+                    <BodyCell>{vendor.vendor_id || '-'}</BodyCell>
+                    <BodyCell>{vendor.trn_no || '-'}</BodyCell>
+                    <BodyCell>{vendor.po_box || '-'}</BodyCell>
                     <BodyCell>{vendor.country}</BodyCell>
                     <BodyCell>{vendor.city}</BodyCell>
-                    <BodyCell>{vendor.contact_person_name}</BodyCell>
-                    <BodyCell>{vendor.mobile_number || '-'}</BodyCell>
+                    <BodyCell>
+                      {vendor.contacts.length > 0 ? (
+                        <div className="space-y-1">
+                          {vendor.contacts.map((contact, index) => (
+                            <div key={getContactKey(contact, index, 'name')}>
+                              {contact.name || '-'}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        vendor.contact_person_name || '-'
+                      )}
+                    </BodyCell>
+                    <BodyCell>
+                      {vendor.contacts.length > 0 ? (
+                        <div className="space-y-1">
+                          {vendor.contacts.map((contact, index) => (
+                            <div key={getContactKey(contact, index, 'mobile')}>
+                              {contact.mobile_number || '-'}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        vendor.mobile_number || '-'
+                      )}
+                    </BodyCell>
                     <BodyCell>{vendor.company_telephone || '-'}</BodyCell>
+                    <BodyCell>
+                      {vendor.contacts.length > 0 ? (
+                        <div className="space-y-1">
+                          {vendor.contacts.map((contact, index) => (
+                            <div key={getContactKey(contact, index, 'email')}>
+                              {contact.email || '-'}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        vendor.email || '-'
+                      )}
+                    </BodyCell>
                     <BodyCell>{vendor.product_details || '-'}</BodyCell>
                     <BodyCell>{vendor.review || '-'}</BodyCell>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <BodyCell colSpan={8}>
+                  <BodyCell colSpan={12}>
                     {loading
                       ? 'Loading vendor details...'
-                      : 'No vendor details found for the selected supplier.'}
+                      : vendors.length === 0
+                        ? 'No vendor details saved yet.'
+                        : 'No vendor details found for this search.'}
                   </BodyCell>
                 </tr>
               )}

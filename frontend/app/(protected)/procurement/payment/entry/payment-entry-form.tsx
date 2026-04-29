@@ -301,9 +301,6 @@ export default function PaymentEntryForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Payment Entry</h1>
-        <p className="mt-2 text-slate-700">
-          Enter payment details against a purchase order.
-        </p>
       </div>
 
       <form
@@ -315,7 +312,9 @@ export default function PaymentEntryForm() {
             <select
               value={form.poNumber}
               onChange={(e) => handlePoChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.poNumber ? 'text-black' : 'text-neutral-400'
+              }`}
               required
               disabled={loadingPurchaseOrders}
             >

@@ -3,9 +3,11 @@ from django.db import transaction
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
+from accounts.permissions import ApiRoleAccessPermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.roles import is_manager_or_admin
 from shared.company import get_company_from_request
 from shared.period_closing import ensure_request_dates_in_open_period
 
@@ -105,7 +107,7 @@ def serialize_line_items_for_storage(line_items):
 
 
 class VendorEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -119,17 +121,44 @@ class VendorEntryAPIView(APIView):
 
 
 class VendorListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
-        vendors = Vendor.objects.filter(company=company).order_by('supplier_name')
+        vendors = (
+            Vendor.objects.filter(company=company)
+            .prefetch_related('contacts')
+            .order_by('supplier_name')
+        )
         serializer = VendorSerializer(vendors, many=True)
         return Response(serializer.data)
 
 
+class VendorDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+
+    def patch(self, request, pk):
+        company = get_company_from_request(request)
+        vendor = (
+            Vendor.objects.filter(company=company)
+            .prefetch_related('contacts')
+            .get(pk=pk)
+        )
+        serializer = VendorSerializer(
+            vendor,
+            data=request.data,
+            partial=True,
+            context={'request': request, 'company': company},
+        )
+        serializer.is_valid(raise_exception=True)
+        vendor = serializer.save()
+        return Response(
+            VendorSerializer(vendor, context={'request': request, 'company': company}).data
+        )
+
+
 class PurchaseOrderEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -219,7 +248,7 @@ class PurchaseOrderEntryAPIView(APIView):
 
 
 class PurchaseOrderListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -246,11 +275,11 @@ class PurchaseOrderListAPIView(APIView):
 
 
 class PurchaseOrderApproveAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request, pk):
-        if getattr(request.user, 'role', '') != 'admin':
-            raise PermissionDenied('Only admin can approve purchase orders.')
+        if not is_manager_or_admin(getattr(request.user, 'role', '')):
+            raise PermissionDenied('Only manager or admin can approve purchase orders.')
 
         company = get_company_from_request(request)
         purchase_order = PurchaseOrder.objects.get(pk=pk, company=company)
@@ -273,7 +302,7 @@ class PurchaseOrderApproveAPIView(APIView):
 
 
 class PaymentEntryCreateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -346,7 +375,7 @@ class PaymentEntryCreateAPIView(APIView):
 
 
 class PaymentEntryListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -364,7 +393,7 @@ class PaymentEntryListAPIView(APIView):
 
 
 class PaymentEntryUpdateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -413,7 +442,7 @@ class PaymentEntryUpdateAPIView(APIView):
 
 
 class InventoryIssuanceEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -438,7 +467,7 @@ class InventoryIssuanceEntryAPIView(APIView):
 
 
 class InventoryIssuanceListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -455,7 +484,7 @@ class InventoryIssuanceListAPIView(APIView):
 
 
 class InventoryRelevantCostAllocationAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -522,7 +551,7 @@ class InventoryRelevantCostAllocationAPIView(APIView):
 
 
 class PettyCashVoucherEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -580,7 +609,7 @@ class PettyCashVoucherEntryAPIView(APIView):
 
 
 class PettyCashVoucherListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -590,7 +619,7 @@ class PettyCashVoucherListAPIView(APIView):
 
 
 class AssetDepositEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -605,7 +634,7 @@ class AssetDepositEntryAPIView(APIView):
 
 
 class AssetDepositListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -615,7 +644,7 @@ class AssetDepositListAPIView(APIView):
 
 
 class DividendInvestmentEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -630,7 +659,7 @@ class DividendInvestmentEntryAPIView(APIView):
 
 
 class DividendInvestmentListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -640,7 +669,7 @@ class DividendInvestmentListAPIView(APIView):
 
 
 class GlPeriodClosingAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -674,11 +703,11 @@ class GlPeriodClosingAPIView(APIView):
 
 
 class GlPeriodClosingApproveAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request, pk):
-        if getattr(request.user, 'role', '') != 'admin':
-            raise PermissionDenied('Only admin can approve GL period closing.')
+        if not is_manager_or_admin(getattr(request.user, 'role', '')):
+            raise PermissionDenied('Only manager or admin can approve GL period closing.')
 
         company = get_company_from_request(request)
         period = GlPeriodClosing.objects.get(pk=pk, company=company)
@@ -690,7 +719,7 @@ class GlPeriodClosingApproveAPIView(APIView):
 
 
 class PcrReportSnapshotAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -759,11 +788,11 @@ class PcrReportSnapshotAPIView(APIView):
 
 
 class PcrReportSnapshotApproveAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request, pk):
-        if getattr(request.user, 'role', '') != 'admin':
-            raise PermissionDenied('Only admin can approve PCR snapshots.')
+        if not is_manager_or_admin(getattr(request.user, 'role', '')):
+            raise PermissionDenied('Only manager or admin can approve PCR snapshots.')
 
         company = get_company_from_request(request)
         snapshot = PcrReportSnapshot.objects.get(pk=pk, company=company)
@@ -781,7 +810,7 @@ class PcrReportSnapshotApproveAPIView(APIView):
 
 
 class BurReportSnapshotAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -844,11 +873,11 @@ class BurReportSnapshotAPIView(APIView):
 
 
 class BurReportSnapshotApproveAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request, pk):
-        if getattr(request.user, 'role', '') != 'admin':
-            raise PermissionDenied('Only admin can approve BUR snapshots.')
+        if not is_manager_or_admin(getattr(request.user, 'role', '')):
+            raise PermissionDenied('Only manager or admin can approve BUR snapshots.')
 
         company = get_company_from_request(request)
         snapshot = BurReportSnapshot.objects.get(pk=pk, company=company)
@@ -866,11 +895,11 @@ class BurReportSnapshotApproveAPIView(APIView):
 
 
 class BurReportSnapshotRejectAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request, pk):
-        if getattr(request.user, 'role', '') != 'admin':
-            raise PermissionDenied('Only admin can reject BUR snapshots.')
+        if not is_manager_or_admin(getattr(request.user, 'role', '')):
+            raise PermissionDenied('Only manager or admin can reject BUR snapshots.')
 
         company = get_company_from_request(request)
         snapshot = BurReportSnapshot.objects.get(pk=pk, company=company)

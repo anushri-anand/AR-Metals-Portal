@@ -215,9 +215,6 @@ export default function PersonalDetailsUpdateForm() {
         <h1 className="text-2xl font-bold text-slate-900">
           Personal Details Update
         </h1>
-        <p className="mt-2 text-slate-700">
-          Select an employee and create a new updated record without deleting the old one.
-        </p>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -229,7 +226,9 @@ export default function PersonalDetailsUpdateForm() {
             <select
               value={selectedEmployeeId}
               onChange={(e) => handleEmployeeIdChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedEmployeeId ? 'text-black' : 'text-neutral-500'
+              }`}
             >
               <option value="">Select employee ID</option>
               {employeeOptions.map((employee) => (
@@ -247,7 +246,9 @@ export default function PersonalDetailsUpdateForm() {
             <select
               value={selectedEmployeeName}
               onChange={(e) => handleEmployeeNameChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedEmployeeName ? 'text-black' : 'text-neutral-500'
+              }`}
             >
               <option value="">Select employee name</option>
               {employeeOptions.map((employee) => (
@@ -357,7 +358,9 @@ export default function PersonalDetailsUpdateForm() {
                   name="salaryStartDate"
                   value={form.salaryStartDate}
                   onChange={handleChange}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                  className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                    form.salaryStartDate ? 'text-black' : 'text-neutral-500'
+                  }`}
                 />
               </Field>
 
@@ -383,7 +386,9 @@ export default function PersonalDetailsUpdateForm() {
                   name="employmentEndDate"
                   value={form.employmentEndDate}
                   onChange={handleChange}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                  className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                    form.employmentEndDate ? 'text-black' : 'text-neutral-500'
+                  }`}
                 />
               </Field>
             </div>

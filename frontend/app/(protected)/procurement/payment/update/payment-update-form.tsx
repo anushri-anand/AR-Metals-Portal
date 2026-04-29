@@ -218,10 +218,6 @@ export default function PaymentUpdateForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Payment Update</h1>
-        <p className="mt-2 text-slate-700">
-          Select a real payment record and update forecast date plus invoice
-          payment details.
-        </p>
       </div>
 
       <form
@@ -233,7 +229,9 @@ export default function PaymentUpdateForm() {
             <select
               value={form.poNumber}
               onChange={(e) => handlePoChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.poNumber ? 'text-black' : 'text-neutral-400'
+              }`}
               disabled={loading}
             >
               <option value="">
@@ -251,7 +249,9 @@ export default function PaymentUpdateForm() {
             <select
               value={form.projectName}
               onChange={(e) => handleProjectChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.projectName ? 'text-black' : 'text-neutral-400'
+              }`}
               disabled={loading}
             >
               <option value="">Select project</option>
@@ -267,7 +267,9 @@ export default function PaymentUpdateForm() {
             <select
               value={form.supplierName}
               onChange={(e) => handleSupplierChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.supplierName ? 'text-black' : 'text-neutral-400'
+              }`}
               disabled={loading}
             >
               <option value="">Select supplier</option>

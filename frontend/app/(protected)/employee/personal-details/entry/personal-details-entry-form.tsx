@@ -137,9 +137,6 @@ export default function PersonalDetailsEntryForm() {
         <h1 className="text-2xl font-bold text-slate-900">
           Personal Details Entry
         </h1>
-        <p className="mt-2 text-slate-700">
-          Enter employee personal and salary details.
-        </p>
       </div>
 
       <form
@@ -163,36 +160,40 @@ export default function PersonalDetailsEntryForm() {
               name="employeeName"
               value={form.employeeName}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-black placeholder:text-neutral-400"
               placeholder="Enter employee name"
               required
             />
           </Field>
+
 
           <Field label="Designation">
             <input
               name="designation"
               value={form.designation}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-black placeholder:text-neutral-400"
               placeholder="Enter designation"
               required
             />
           </Field>
 
           <Field label="Category">
-            <select
-              name="category"
-              value={form.category}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-              required
-            >
-              <option value="">Select category</option>
-              <option value="Staff">Staff</option>
-              <option value="Labour">Labour</option>
-            </select>
+          <select
+            name="category"
+            value={form.category}
+            onChange={handleChange}
+            className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+              form.category ? 'text-black' : 'text-neutral-400'
+            }`}
+            required
+          >
+            <option value="">Select category</option>
+            <option value="Staff">Staff</option>
+            <option value="Labour">Labour</option>
+          </select>
           </Field>
+
 
           <Field label="VISA Start Date">
             <input
@@ -200,7 +201,9 @@ export default function PersonalDetailsEntryForm() {
               name="visaStartDate"
               value={form.visaStartDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.visaStartDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -210,7 +213,9 @@ export default function PersonalDetailsEntryForm() {
               name="visaEndDate"
               value={form.visaEndDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.visaEndDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -220,7 +225,9 @@ export default function PersonalDetailsEntryForm() {
               name="passportExpiryDate"
               value={form.passportExpiryDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.passportExpiryDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -229,7 +236,9 @@ export default function PersonalDetailsEntryForm() {
               name="visaUnder"
               value={form.visaUnder}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.visaUnder ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select visa under</option>
@@ -268,7 +277,9 @@ export default function PersonalDetailsEntryForm() {
               name="salaryStartDate"
               value={form.salaryStartDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.salaryStartDate ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>
@@ -285,7 +296,9 @@ export default function PersonalDetailsEntryForm() {
               name="employmentStartDate"
               value={form.employmentStartDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.employmentStartDate ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 
 type EmployeeOption = {
   id: number
@@ -109,9 +110,6 @@ export default function PersonalDetailsViewClient() {
         <h1 className="text-2xl font-bold text-slate-900">
           Personal Details View
         </h1>
-        <p className="mt-2 text-slate-700">
-          View the complete history of employee personal and salary records.
-        </p>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -123,7 +121,9 @@ export default function PersonalDetailsViewClient() {
             <select
               value={selectedEmployeeId}
               onChange={(e) => handleEmployeeIdChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedEmployeeId ? 'text-black' : 'text-neutral-500'
+              }`}
             >
               <option value="">Select employee ID</option>
               {employeeOptions.map((employee) => (
@@ -141,7 +141,9 @@ export default function PersonalDetailsViewClient() {
             <select
               value={selectedEmployeeName}
               onChange={(e) => handleEmployeeNameChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedEmployeeName ? 'text-black' : 'text-neutral-500'
+              }`}
             >
               <option value="">Select employee name</option>
               {employeeOptions.map((employee) => (
@@ -220,10 +222,14 @@ export default function PersonalDetailsViewClient() {
 
 function formatDateOrDash(value: string | null) {
   if (!value) return '-'
-  return new Date(value).toLocaleDateString()
+  return formatDate(value)
 }
 
 function formatDateOrPresent(value: string | null) {
   if (!value) return 'Present'
-  return new Date(value).toLocaleDateString()
+  return formatDate(value)
+}
+
+function formatDate(value: string) {
+  return formatDateDdMmmYy(value)
 }

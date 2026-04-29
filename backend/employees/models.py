@@ -91,9 +91,10 @@ class TimeEntry(models.Model):
 
     start_time = models.TimeField(null=True, blank=True)
     finish_time = models.TimeField(null=True, blank=True)
+    finish_time_is_2400 = models.BooleanField(default=False)
 
     total_time = models.DecimalField(max_digits=6, decimal_places=2, default=0)
-    regular_duty_hours = models.DecimalField(max_digits=6, decimal_places=2, default=9)
+    regular_duty_hours = models.DecimalField(max_digits=6, decimal_places=2, default=9.5)
 
     normal_ot = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     sunday_ot = models.DecimalField(max_digits=6, decimal_places=2, default=0)
@@ -112,6 +113,17 @@ class TimeEntry(models.Model):
 
     def __str__(self):
         return f'{self.employee.employee_id} - {self.date}'
+
+
+class PublicHolidayDate(models.Model):
+    date = models.DateField(unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['date']
+
+    def __str__(self):
+        return self.date.isoformat()
 
 
 class AnnualLeave(models.Model):

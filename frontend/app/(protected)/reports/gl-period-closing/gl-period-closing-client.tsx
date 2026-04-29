@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { hasRoleAccess } from '@/lib/access'
 
 type PeriodRecord = {
   id: number
@@ -109,10 +110,6 @@ export default function GlPeriodClosingClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">GL Period Closing</h1>
-        <p className="mt-2 text-slate-700">
-          Submit a month and year for closing. Once approved, entries cannot use that
-          month or any earlier date.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -193,7 +190,8 @@ export default function GlPeriodClosingClient() {
                     <BodyCell>{period.approved_by || '-'}</BodyCell>
                     <BodyCell>{formatDateTime(period.approved_at)}</BodyCell>
                     <BodyCell>
-                      {role === 'admin' && period.status !== 'approved' ? (
+                      {hasRoleAccess(role, ['manager', 'admin']) &&
+                      period.status !== 'approved' ? (
                         <button
                           type="button"
                           onClick={() => handleApprove(period.id)}

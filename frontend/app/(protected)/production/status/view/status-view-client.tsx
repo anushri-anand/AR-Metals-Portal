@@ -20,6 +20,7 @@ import {
   type ProductionProjectOption,
   updateProjectItemSelection,
 } from '@/lib/production-selection'
+import { BASE_PROJECT_LABEL, getVariationDisplayLabel } from '@/lib/variation-number'
 
 type SummaryStage = {
   key: string
@@ -105,7 +106,7 @@ export default function ProductionStatusViewClient() {
   useEffect(() => {
     async function loadProjects() {
       try {
-        const data = await fetchAPI('/production/project-details/options/')
+        const data = await fetchAPI('/production/contract-options/')
         setProjectOptions(data)
       } catch (err) {
         setError(
@@ -233,10 +234,6 @@ export default function ProductionStatusViewClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Production Status View</h1>
-        <p className="mt-2 text-slate-700">
-          Review stage progress against total quantity, then drill into one stage
-          by daily, weekly, or monthly periods.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -246,7 +243,9 @@ export default function ProductionStatusViewClient() {
             <select
               value={filters.projectNumber}
               onChange={(e) => handleSelectionChange('projectNumber', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                filters.projectNumber ? 'text-black' : 'text-neutral-400'
+              }`}
             >
               <option value="">Select project #</option>
               {projectOptions.map((project) => (
@@ -269,7 +268,7 @@ export default function ProductionStatusViewClient() {
               <option value="">Base Project</option>
               {variationOptions.map((variation) => (
                 <option key={variation.id} value={variation.variation_number}>
-                  {variation.variation_number}
+                  {getVariationDisplayLabel(variation.variation_number)}
                 </option>
               ))}
             </select>
@@ -279,7 +278,9 @@ export default function ProductionStatusViewClient() {
             <select
               value={filters.projectName}
               onChange={(e) => handleSelectionChange('projectName', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                filters.projectName ? 'text-black' : 'text-neutral-400'
+              }`}
             >
               <option value="">Select project name</option>
               {projectOptions.map((project) => (
@@ -294,16 +295,12 @@ export default function ProductionStatusViewClient() {
             <select
               value={filters.package}
               onChange={(e) => handleSelectionChange('package', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-              disabled={
-                !filters.projectNumber ||
-                !filters.projectName ||
-                Boolean(filters.variationNumber)
-              }
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                filters.package ? 'text-black' : 'text-neutral-400'
+              }`}
+              disabled={!filters.projectNumber || !filters.projectName}
             >
-              <option value="">
-                {filters.variationNumber ? 'Variation status' : 'Select package'}
-              </option>
+              <option value="">Select package</option>
               {packageOptions.map((packageValue) => (
                 <option key={packageValue} value={packageValue}>
                   {packageValue}
@@ -339,7 +336,11 @@ export default function ProductionStatusViewClient() {
               </h2>
               <p className="mt-1 text-sm text-slate-600">
                 {summary.project_number} | {summary.project_name}
-                {summary.variation_number ? ` | ${summary.variation_number}` : ''}
+                {` | ${
+                  summary.variation_number
+                    ? getVariationDisplayLabel(summary.variation_number)
+                    : BASE_PROJECT_LABEL
+                }`}
               </p>
               <p className="mt-1 text-sm text-slate-600">
                 Package: {summary.package || '-'} | Total Quantity: {summary.total_quantity}{' '}

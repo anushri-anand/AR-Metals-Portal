@@ -2,17 +2,20 @@
 
 import { useEffect, useState } from 'react'
 import {
+  ClientData,
   ContractType,
   contractTypeOptions,
   geographyOptions,
   GeographyType,
   TenderLog,
+  getClientData,
   getTenderLogs,
   tenderStatusOptions,
   updateTenderLog,
 } from '@/lib/estimation-storage'
 
 type TenderLogUpdateForm = {
+  contactId: string
   quoteRef: string
   revisionNumber: string
   revisionDate: string
@@ -26,6 +29,7 @@ type TenderLogUpdateForm = {
 }
 
 const initialForm: TenderLogUpdateForm = {
+  contactId: '',
   quoteRef: '',
   revisionNumber: '',
   revisionDate: '',
@@ -39,6 +43,7 @@ const initialForm: TenderLogUpdateForm = {
 }
 
 export default function TenderLogUpdateClient() {
+  const [clients, setClients] = useState<ClientData[]>([])
   const [tenders, setTenders] = useState<TenderLog[]>([])
   const [selectedTenderNumber, setSelectedTenderNumber] = useState('')
   const [form, setForm] = useState(initialForm)
@@ -49,9 +54,13 @@ export default function TenderLogUpdateClient() {
   useEffect(() => {
     async function loadTenders() {
       try {
-        const savedTenders = await getTenderLogs()
+        const [savedClients, savedTenders] = await Promise.all([
+          getClientData(),
+          getTenderLogs(),
+        ])
         const sortedTenders = [...savedTenders].sort(sortTenders)
 
+        setClients(savedClients)
         setTenders(sortedTenders)
         if (sortedTenders[0]) {
           setSelectedTenderNumber(sortedTenders[0].tenderNumber)
@@ -68,6 +77,9 @@ export default function TenderLogUpdateClient() {
   const selectedTender = tenders.find(
     (tender) => tender.tenderNumber === selectedTenderNumber
   )
+  const selectedClient =
+    clients.find((client) => String(client.id) === String(selectedTender?.clientId || '')) ||
+    null
 
   function handleTenderChange(value: string) {
     const tender = tenders.find((item) => item.tenderNumber === value)
@@ -108,6 +120,7 @@ export default function TenderLogUpdateClient() {
         quoteRef: form.quoteRef.trim(),
         revisionNumber: form.revisionNumber.trim(),
         revisionDate: form.revisionDate || null,
+        contactId: form.contactId ? Number(form.contactId) : null,
         geography: form.geography,
         typeOfContract: form.typeOfContract,
         description: form.description.trim(),
@@ -136,10 +149,6 @@ export default function TenderLogUpdateClient() {
         <h1 className="text-2xl font-bold text-slate-900">
           Update Submitted Tender
         </h1>
-        <p className="mt-2 text-slate-700">
-          Select a submitted tender and update the fields that were optional
-          during entry.
-        </p>
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       </div>
 
@@ -152,7 +161,9 @@ export default function TenderLogUpdateClient() {
             <select
               value={selectedTenderNumber}
               onChange={(event) => handleTenderChange(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedTenderNumber ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select tender</option>
@@ -165,7 +176,28 @@ export default function TenderLogUpdateClient() {
           </Field>
 
           <ReadOnlyField label="Client Name" value={selectedTender?.clientName} />
-          <ReadOnlyField label="Contact Name" value={selectedTender?.contactName} />
+          <Field label="Contact Name">
+            <select
+              name="contactId"
+              value={form.contactId}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              disabled={!selectedClient || selectedClient.contacts.length === 0}
+            >
+              <option value="">
+                {selectedClient
+                  ? selectedClient.contacts.length > 0
+                    ? 'Select contact person'
+                    : 'No contact person saved'
+                  : 'No client selected'}
+              </option>
+              {selectedClient?.contacts.map((contact) => (
+                <option key={contact.id} value={contact.id}>
+                  {contact.name}
+                </option>
+              ))}
+            </select>
+          </Field>
           <ReadOnlyField label="Project Name" value={selectedTender?.projectName} />
           <ReadOnlyField
             label="Project Location"
@@ -206,7 +238,9 @@ export default function TenderLogUpdateClient() {
               name="tenderDate"
               value={form.tenderDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.tenderDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -226,7 +260,9 @@ export default function TenderLogUpdateClient() {
               name="revisionDate"
               value={form.revisionDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.revisionDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -321,6 +357,7 @@ function sortTenders(a: TenderLog, b: TenderLog) {
 
 function createForm(tender: TenderLog) {
   return {
+    contactId: tender.contactId ? String(tender.contactId) : '',
     quoteRef: tender.quoteRef || '',
     revisionNumber: tender.revisionNumber || '',
     revisionDate: tender.revisionDate || '',

@@ -1,11 +1,18 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { hasRoleAccess } from '@/lib/access'
+import {
+  compareVariationNumbers,
+  normalizeVariationNumber,
+} from '@/lib/variation-number'
 import {
   approveCostingRevisionSnapshot,
   BoqItem,
+  ContractVariationLog,
   CostingRevisionSnapshot,
   MasterListItem,
   TenderCosting,
@@ -14,6 +21,7 @@ import {
   createId,
   formatMoney,
   getBoqItems,
+  getContractVariationLogs,
   getCostingRevisionSnapshots,
   getMasterListItems,
   getTenderCostings,
@@ -53,6 +61,7 @@ const costColumnWidths = [
   100,
   115,
   125,
+  180,
 ]
 const tableWidth =
   frozenColumns.reduce((total, column) => total + column.width, 0) +
@@ -61,6 +70,8 @@ const tableWidth =
 type NumericBoqField =
   | 'quantity'
   | 'freightCustomDutyPercent'
+  | 'prelimsPercent'
+  | 'markup'
 
 type CommonValueField =
   | 'prelimsPercent'
@@ -71,6 +82,14 @@ type CommonValueField =
 
 type CommonValues = Record<CommonValueField, number>
 
+type ProjectOption = {
+  id: number
+  project_name: string
+  project_number: string
+  tender_number?: string
+  revision_number?: string
+}
+
 function createEmptyRow(sn = '1'): BoqItem {
   return {
     id: createId('boq'),
@@ -78,6 +97,7 @@ function createEmptyRow(sn = '1'): BoqItem {
     tenderNumber: '',
     revisionNumber: '',
     revisionDate: null,
+    variationNumber: '',
     clientsBoq: '',
     package: '',
     description: '',
@@ -89,6 +109,7 @@ function createEmptyRow(sn = '1'): BoqItem {
     commitmentsPercent: 0,
     contingenciesPercent: 0,
     markup: 0,
+    remarks: '',
   }
 }
 
@@ -102,14 +123,26 @@ function createEmptyCommonValues(): CommonValues {
   }
 }
 
-export default function CostingClient() {
+export default function CostingClient({
+  mode = 'original',
+}: {
+  mode?: 'original' | 'variation'
+}) {
+  const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [allRows, setAllRows] = useState<BoqItem[]>([])
   const [rows, setRows] = useState<BoqItem[]>([createEmptyRow()])
   const [masterItems, setMasterItems] = useState<MasterListItem[]>([])
   const [costings, setCostings] = useState<TenderCosting[]>([])
   const [tenderLogs, setTenderLogs] = useState<TenderLog[]>([])
+  const [variationLogs, setVariationLogs] = useState<ContractVariationLog[]>([])
+  const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
   const [snapshots, setSnapshots] = useState<CostingRevisionSnapshot[]>([])
+  const [selectedProjectNumber, setSelectedProjectNumber] = useState('')
+  const [selectedProjectName, setSelectedProjectName] = useState('')
   const [selectedTenderNumber, setSelectedTenderNumber] = useState('')
+  const [selectedVariationNumber, setSelectedVariationNumber] = useState('')
   const [revisionNumber, setRevisionNumber] = useState('')
   const [revisionDate, setRevisionDate] = useState('')
   const [commonValues, setCommonValues] = useState<CommonValues>(
@@ -123,6 +156,11 @@ export default function CostingClient() {
   const [approvingSnapshotId, setApprovingSnapshotId] = useState<number | null>(
     null
   )
+  const initialProjectNumber = searchParams.get('projectNumber') || ''
+  const initialProjectName = searchParams.get('projectName') || ''
+  const initialTenderNumber = searchParams.get('tenderNumber') || ''
+  const initialVariationNumber = searchParams.get('variationNumber') || ''
+  const initialRevisionNumber = searchParams.get('revisionNumber') || ''
 
   useEffect(() => {
     async function loadData() {
@@ -132,6 +170,8 @@ export default function CostingClient() {
           savedMasterItems,
           savedCostings,
           savedTenderLogs,
+          savedVariationLogs,
+          savedProjectOptions,
           savedSnapshots,
           me,
         ] = await Promise.all([
@@ -139,40 +179,141 @@ export default function CostingClient() {
           getMasterListItems(),
           getTenderCostings(),
           getTenderLogs(),
+          getContractVariationLogs(),
+          fetchAPI('/production/project-details/options/'),
           getCostingRevisionSnapshots(),
           fetchAPI('/accounts/me/'),
         ])
+        const normalizedProjectOptions = Array.isArray(savedProjectOptions)
+          ? (savedProjectOptions as ProjectOption[])
+          : []
         const tenderNumbers = getTenderNumbers(savedBoqItems, savedTenderLogs)
-        const firstTenderNumber = tenderNumbers[0] || ''
-        const firstRevisionNumber = getDefaultRevisionNumber(
-          savedBoqItems,
-          savedSnapshots,
-          firstTenderNumber
-        )
-        const firstRevisionDate = getRevisionDate(
-          savedBoqItems,
-          firstTenderNumber,
-          firstRevisionNumber
-        )
-        const firstRows = firstTenderNumber
-          ? getRowsForRevisionSelection(
-              savedBoqItems,
-              firstTenderNumber,
-              firstRevisionNumber
-            )
-          : [createEmptyRow()]
-        const firstCommonValues = getCommonValuesForRows(firstRows)
+        const initialProject =
+          mode === 'variation'
+            ? normalizedProjectOptions.find(
+                (project) =>
+                  project.project_number === initialProjectNumber ||
+                  project.project_name === initialProjectName
+              ) || null
+            : null
+        const firstTenderNumber =
+          mode === 'variation'
+            ? initialTenderNumber || initialProject?.tender_number || ''
+            : tenderNumbers[0] || ''
+        const firstVariationNumber =
+          mode === 'variation'
+            ? initialVariationNumber &&
+              getVariationNumbersForProject(
+                savedVariationLogs,
+                initialProject?.project_number || initialProjectNumber
+              ).includes(initialVariationNumber)
+              ? initialVariationNumber
+              : ''
+            : ''
+        const firstRevisionNumber =
+          mode === 'variation'
+            ? firstVariationNumber
+              ? initialRevisionNumber ||
+                getDefaultRevisionNumber(
+                  savedBoqItems,
+                  savedSnapshots,
+                  firstTenderNumber,
+                  firstVariationNumber
+                )
+              : initialRevisionNumber || 'R0'
+            : getDefaultRevisionNumber(
+                savedBoqItems,
+                savedSnapshots,
+                firstTenderNumber,
+                ''
+              )
+        const firstRevisionDate =
+          mode === 'variation'
+            ? firstTenderNumber && firstVariationNumber
+              ? getRevisionDate(
+                  savedBoqItems,
+                  firstTenderNumber,
+                  firstRevisionNumber,
+                  firstVariationNumber
+                )
+              : ''
+            : getRevisionDate(
+                savedBoqItems,
+                firstTenderNumber,
+                firstRevisionNumber,
+                ''
+              )
+        const firstRows =
+          mode === 'variation'
+            ? firstTenderNumber && firstVariationNumber
+              ? applyVariationDefaultsToRows(
+                  getRowsForRevisionSelection(
+                    savedBoqItems,
+                    firstTenderNumber,
+                    firstRevisionNumber,
+                    firstVariationNumber
+                  ),
+                  savedBoqItems,
+                  firstTenderNumber,
+                  firstVariationNumber
+                )
+              : firstTenderNumber
+                ? applyVariationDefaultsToRows(
+                    [
+                      {
+                        ...createEmptyRow(),
+                        tenderNumber: firstTenderNumber,
+                        revisionNumber: firstRevisionNumber,
+                        variationNumber: firstVariationNumber,
+                      },
+                    ],
+                    savedBoqItems,
+                    firstTenderNumber,
+                    firstVariationNumber
+                  )
+                : [createEmptyRow()]
+            : firstTenderNumber
+              ? getRowsForRevisionSelection(
+                  savedBoqItems,
+                  firstTenderNumber,
+                  firstRevisionNumber,
+                  ''
+                )
+              : [createEmptyRow()]
+        const firstCommonValues =
+          mode === 'variation'
+            ? createEmptyCommonValues()
+            : getCommonValuesForRows(firstRows)
 
         setAllRows(savedBoqItems)
         setMasterItems(savedMasterItems)
         setCostings(savedCostings)
         setTenderLogs(savedTenderLogs)
+        setVariationLogs(savedVariationLogs)
+        setProjectOptions(normalizedProjectOptions)
         setSnapshots(savedSnapshots)
+        setSelectedProjectNumber(
+          mode === 'variation'
+            ? initialProject?.project_number || initialProjectNumber
+            : ''
+        )
+        setSelectedProjectName(
+          mode === 'variation'
+            ? initialProject?.project_name || initialProjectName
+            : ''
+        )
         setSelectedTenderNumber(firstTenderNumber)
+        setSelectedVariationNumber(mode === 'variation' ? firstVariationNumber : '')
         setRevisionNumber(firstRevisionNumber)
         setRevisionDate(firstRevisionDate)
-        setCommonValues(firstCommonValues)
-        setRows(applyCommonValuesToRows(firstRows, firstCommonValues))
+        setCommonValues(
+          mode === 'variation' ? createEmptyCommonValues() : firstCommonValues
+        )
+        setRows(
+          mode === 'variation'
+            ? firstRows
+            : applyCommonValuesToRows(firstRows, firstCommonValues)
+        )
         setRole(typeof me?.role === 'string' ? me.role : '')
       } catch (err) {
         setError(
@@ -182,26 +323,82 @@ export default function CostingClient() {
     }
 
     loadData()
-  }, [])
+  }, [
+    initialProjectName,
+    initialProjectNumber,
+    initialRevisionNumber,
+    initialTenderNumber,
+    initialVariationNumber,
+    mode,
+  ])
+
+  useEffect(() => {
+    if (mode !== 'variation') {
+      return
+    }
+
+    const nextParams = new URLSearchParams()
+
+    if (selectedProjectNumber) {
+      nextParams.set('projectNumber', selectedProjectNumber)
+    }
+
+    if (selectedProjectName) {
+      nextParams.set('projectName', selectedProjectName)
+    }
+
+    if (selectedTenderNumber) {
+      nextParams.set('tenderNumber', selectedTenderNumber)
+    }
+
+    if (selectedVariationNumber) {
+      nextParams.set('variationNumber', selectedVariationNumber)
+    }
+
+    if (revisionNumber) {
+      nextParams.set('revisionNumber', revisionNumber)
+    }
+
+    const nextUrl = nextParams.toString() ? `${pathname}?${nextParams.toString()}` : pathname
+    router.replace(nextUrl, { scroll: false })
+  }, [
+    mode,
+    pathname,
+    revisionNumber,
+    router,
+    selectedProjectName,
+    selectedProjectNumber,
+    selectedTenderNumber,
+    selectedVariationNumber,
+  ])
 
   const tenderNumbers = getTenderNumbers(allRows, tenderLogs)
+  const availableVariationNumbers = getVariationNumbersForProject(
+    variationLogs,
+    selectedProjectNumber
+  )
   const tableTotals = getTableTotals(rows, costings, masterItems)
   const matchingSnapshot =
-    snapshots.find(
-      (snapshot) =>
-        snapshot.tenderNumber === selectedTenderNumber &&
-        snapshot.revisionNumber === revisionNumber.trim()
-    ) || null
+    (mode === 'variation' && !selectedVariationNumber
+      ? null
+      : snapshots.find(
+          (snapshot) =>
+            snapshot.tenderNumber === selectedTenderNumber &&
+            snapshot.revisionNumber === revisionNumber.trim() &&
+            (snapshot.variationNumber || '') ===
+              (mode === 'variation' ? selectedVariationNumber : '')
+        )) || null
 
   function handleTenderChange(value: string) {
     const nextRevisionNumber = getDefaultRevisionNumber(
       allRows,
       snapshots,
-      value
+      value,
+      ''
     )
-    const nextRevisionDate = getRevisionDate(allRows, value, nextRevisionNumber)
+    const nextRevisionDate = getRevisionDate(allRows, value, nextRevisionNumber, '')
     const nextRows = value
-      ? getRowsForRevisionSelection(allRows, value, nextRevisionNumber)
+      ? getRowsForRevisionSelection(allRows, value, nextRevisionNumber, '')
       : [createEmptyRow()]
     const nextCommonValues = getCommonValuesForRows(nextRows)
 
@@ -214,10 +411,96 @@ export default function CostingClient() {
     setError('')
   }
 
+  function handleProjectNumberChange(projectNumber: string) {
+    const selectedProject =
+      projectOptions.find((project) => project.project_number === projectNumber) ||
+      null
+    const nextTenderNumber = selectedProject?.tender_number || ''
+    const nextRows = nextTenderNumber
+      ? applyVariationDefaultsToRows(
+          [
+            {
+              ...createEmptyRow(),
+              tenderNumber: nextTenderNumber,
+              revisionNumber: 'R0',
+              variationNumber: '',
+            },
+          ],
+          allRows,
+          nextTenderNumber,
+          ''
+        )
+      : [createEmptyRow()]
+
+    setSelectedProjectNumber(projectNumber)
+    setSelectedProjectName(selectedProject?.project_name || '')
+    setSelectedTenderNumber(nextTenderNumber)
+    setSelectedVariationNumber('')
+    setRevisionNumber('R0')
+    setRevisionDate('')
+    setRows(nextRows)
+    setMessage('')
+    setError('')
+  }
+
+  function handleVariationNumberChange(value: string) {
+    const nextRevisionNumber = value
+      ? getDefaultRevisionNumber(allRows, snapshots, selectedTenderNumber, value)
+      : 'R0'
+    const nextRevisionDate = value
+      ? getRevisionDate(
+          allRows,
+          selectedTenderNumber,
+          nextRevisionNumber,
+          value
+        )
+      : ''
+    const nextRows =
+      selectedTenderNumber && value
+        ? applyVariationDefaultsToRows(
+            getRowsForRevisionSelection(
+              allRows,
+              selectedTenderNumber,
+              nextRevisionNumber,
+              value
+            ),
+            allRows,
+            selectedTenderNumber,
+            value
+          )
+        : selectedTenderNumber
+          ? applyVariationDefaultsToRows(
+              [
+                {
+                  ...createEmptyRow(),
+                  tenderNumber: selectedTenderNumber,
+                  revisionNumber: nextRevisionNumber,
+                  variationNumber: '',
+                },
+              ],
+              allRows,
+              selectedTenderNumber,
+              ''
+            )
+          : [createEmptyRow()]
+
+    setSelectedVariationNumber(value)
+    setRevisionNumber(nextRevisionNumber)
+    setRevisionDate(nextRevisionDate)
+    setRows(nextRows)
+    setMessage('')
+    setError('')
+  }
+
   function handleRevisionChange(value: string) {
     const normalizedRevision = value.trim()
     const existingRows = selectedTenderNumber
-      ? getRowsForTenderRevision(allRows, selectedTenderNumber, normalizedRevision)
+      ? getRowsForTenderRevision(
+          allRows,
+          selectedTenderNumber,
+          normalizedRevision,
+          mode === 'variation' ? selectedVariationNumber : ''
+        )
       : []
     const hasExistingRows = existingRows.some(isSavedBoqRow)
     const previousRevisionRows =
@@ -225,7 +508,8 @@ export default function CostingClient() {
         ? getPreviousRevisionRows(
             allRows,
             selectedTenderNumber,
-            normalizedRevision
+            normalizedRevision,
+            mode === 'variation' ? selectedVariationNumber : ''
           )
         : []
     const nextRows =
@@ -235,7 +519,8 @@ export default function CostingClient() {
           ? cloneRowsForRevision(
               previousRevisionRows,
               selectedTenderNumber,
-              normalizedRevision
+              normalizedRevision,
+              mode === 'variation' ? selectedVariationNumber : ''
             )
           : [
               {
@@ -243,6 +528,8 @@ export default function CostingClient() {
                 tenderNumber: selectedTenderNumber,
                 revisionNumber: normalizedRevision,
                 revisionDate: null,
+                variationNumber:
+                  mode === 'variation' ? selectedVariationNumber : '',
               },
             ]
     const nextCommonValues =
@@ -253,11 +540,27 @@ export default function CostingClient() {
     setRevisionNumber(value)
     setRevisionDate(
       hasExistingRows
-        ? getRevisionDate(allRows, selectedTenderNumber, normalizedRevision)
+        ? getRevisionDate(
+            allRows,
+            selectedTenderNumber,
+            normalizedRevision,
+            mode === 'variation' ? selectedVariationNumber : ''
+          )
         : ''
     )
-    setRows(applyCommonValuesToRows(nextRows, nextCommonValues))
-    setCommonValues(nextCommonValues)
+    setRows(
+      mode === 'variation'
+        ? applyVariationDefaultsToRows(
+            nextRows,
+            allRows,
+            selectedTenderNumber,
+            selectedVariationNumber
+          )
+        : applyCommonValuesToRows(nextRows, nextCommonValues)
+    )
+    setCommonValues(
+      mode === 'variation' ? createEmptyCommonValues() : nextCommonValues
+    )
     setMessage(
       previousRevisionRows.length > 0 && !hasExistingRows
         ? `Loaded ${getRevisionLabel(previousRevisionRows[0]?.revisionNumber)} as the starting point for ${getRevisionLabel(normalizedRevision)}.`
@@ -284,17 +587,36 @@ export default function CostingClient() {
   }
 
   function handleAddRow() {
+    const variationDefaults =
+      mode === 'variation'
+        ? getVariationRowDefaults(
+            allRows,
+            selectedTenderNumber,
+            selectedVariationNumber
+          )
+        : null
     setRows((prev) => [
       ...prev,
-      applyCommonValuesToRow(
-        {
-        ...createEmptyRow(String(prev.length + 1)),
-        tenderNumber: selectedTenderNumber,
-        revisionNumber,
-        revisionDate: revisionDate || null,
-        },
-        commonValues
-      ),
+      mode === 'variation'
+        ? applyVariationDefaultsToRow(
+            {
+              ...createEmptyRow(String(prev.length + 1)),
+              tenderNumber: selectedTenderNumber,
+              revisionNumber,
+              revisionDate: revisionDate || null,
+              variationNumber: selectedVariationNumber,
+            },
+            variationDefaults
+          )
+        : applyCommonValuesToRow(
+            {
+              ...createEmptyRow(String(prev.length + 1)),
+              tenderNumber: selectedTenderNumber,
+              revisionNumber,
+              revisionDate: revisionDate || null,
+            },
+            commonValues
+          ),
     ])
   }
 
@@ -302,39 +624,59 @@ export default function CostingClient() {
     setError('')
 
     if (!selectedTenderNumber) {
-      setError('Select a tender number before saving BOQ.')
+      setError(
+        mode === 'variation'
+          ? 'Select a project number before saving BOQ.'
+          : 'Select a tender number before saving BOQ.'
+      )
+      return
+    }
+
+    if (mode === 'variation' && !selectedVariationNumber) {
+      setError('Select a variation number before saving BOQ.')
       return
     }
 
     const rowsToSave = rows
       .filter(
         (row) =>
-          row.clientsBoq || row.package || row.description || row.quantity || row.unit
+          row.clientsBoq ||
+          row.package ||
+          row.description ||
+          row.quantity ||
+          row.unit ||
+          row.remarks
       )
       .map((row, index) => ({
-        ...applyCommonValuesToRow(row, commonValues),
+        ...(mode === 'variation' ? row : applyCommonValuesToRow(row, commonValues)),
         sn: String(index + 1),
         tenderNumber: selectedTenderNumber,
         revisionNumber: revisionNumber.trim(),
         revisionDate: revisionDate || null,
+        variationNumber: mode === 'variation' ? selectedVariationNumber : '',
       }))
     const currentRevisionRows = allRows.filter(
       (row) =>
         row.tenderNumber === selectedTenderNumber &&
-        row.revisionNumber === revisionNumber.trim()
+        row.revisionNumber === revisionNumber.trim() &&
+        (row.variationNumber || '') ===
+          (mode === 'variation' ? selectedVariationNumber : '')
     )
     const previousRevisionRows =
       currentRevisionRows.length === 0
         ? getPreviousRevisionRows(
             allRows,
             selectedTenderNumber,
-            revisionNumber.trim()
+            revisionNumber.trim(),
+            mode === 'variation' ? selectedVariationNumber : ''
           )
         : []
     const rowsFromOtherTenderRevisions = allRows.filter(
       (row) =>
         row.tenderNumber !== selectedTenderNumber ||
-        row.revisionNumber !== revisionNumber.trim()
+        row.revisionNumber !== revisionNumber.trim() ||
+        (row.variationNumber || '') !==
+          (mode === 'variation' ? selectedVariationNumber : '')
     )
 
     try {
@@ -345,7 +687,8 @@ export default function CostingClient() {
       const savedCurrentRows = getRowsForTenderRevision(
         savedRows,
         selectedTenderNumber,
-        revisionNumber.trim()
+        revisionNumber.trim(),
+        mode === 'variation' ? selectedVariationNumber : ''
       )
       let nextCostings = costings
 
@@ -363,10 +706,22 @@ export default function CostingClient() {
 
       setAllRows(savedRows)
       setCostings(nextCostings)
-      setRows(applyCommonValuesToRows(savedCurrentRows, commonValues))
+      setRows(
+        mode === 'variation'
+          ? savedCurrentRows
+          : applyCommonValuesToRows(savedCurrentRows, commonValues)
+      )
       setRevisionNumber(revisionNumber.trim())
-      setCommonValues(getCommonValuesForRows(savedCurrentRows))
-      setMessage('Bill of Quantity saved.')
+      setCommonValues(
+        mode === 'variation'
+          ? createEmptyCommonValues()
+          : getCommonValuesForRows(savedCurrentRows)
+      )
+      setMessage(
+        mode === 'variation'
+          ? 'Variation Bill of Quantity saved.'
+          : 'Bill of Quantity saved.'
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save BOQ.')
     }
@@ -374,14 +729,25 @@ export default function CostingClient() {
 
   async function handleSubmitRevision() {
     if (!selectedTenderNumber) {
-      setError('Select a tender number before submitting.')
+      setError(
+        mode === 'variation'
+          ? 'Select a project number before submitting.'
+          : 'Select a tender number before submitting.'
+      )
+      return
+    }
+
+    if (mode === 'variation' && !selectedVariationNumber) {
+      setError('Select a variation number before submitting.')
       return
     }
 
     const hasSavedCurrentRows = allRows.some(
       (row) =>
         row.tenderNumber === selectedTenderNumber &&
-        row.revisionNumber === revisionNumber.trim()
+        row.revisionNumber === revisionNumber.trim() &&
+        (row.variationNumber || '') ===
+          (mode === 'variation' ? selectedVariationNumber : '')
     )
 
     if (!hasSavedCurrentRows) {
@@ -396,8 +762,12 @@ export default function CostingClient() {
     try {
       const savedSnapshot = await submitCostingRevisionSnapshot({
         tenderNumber: selectedTenderNumber,
-        projectName: getTenderProjectName(tenderLogs, selectedTenderNumber),
+        projectName:
+          mode === 'variation'
+            ? selectedProjectName
+            : getTenderProjectName(tenderLogs, selectedTenderNumber),
         revisionNumber: revisionNumber.trim(),
+        variationNumber: mode === 'variation' ? selectedVariationNumber : '',
       })
 
       setSnapshots((prev) => upsertCostingSnapshot(prev, savedSnapshot))
@@ -425,31 +795,49 @@ export default function CostingClient() {
       setSnapshots(nextSnapshots)
       if (
         approvedSnapshot.tenderNumber === selectedTenderNumber &&
-        approvedSnapshot.revisionNumber === revisionNumber.trim()
+        approvedSnapshot.revisionNumber === revisionNumber.trim() &&
+        (approvedSnapshot.variationNumber || '') ===
+          (mode === 'variation' ? selectedVariationNumber : '')
       ) {
         const nextRevisionNumber = getDefaultRevisionNumber(
           allRows,
           nextSnapshots,
-          selectedTenderNumber
+          selectedTenderNumber,
+          mode === 'variation' ? selectedVariationNumber : ''
         )
         const nextRevisionDate = getRevisionDate(
           allRows,
           selectedTenderNumber,
-          nextRevisionNumber
+          nextRevisionNumber,
+          mode === 'variation' ? selectedVariationNumber : ''
         )
         const nextRows = selectedTenderNumber
           ? getRowsForRevisionSelection(
               allRows,
               selectedTenderNumber,
-              nextRevisionNumber
+              nextRevisionNumber,
+              mode === 'variation' ? selectedVariationNumber : ''
             )
           : [createEmptyRow()]
         const nextCommonValues = getCommonValuesForRows(nextRows)
 
         setRevisionNumber(nextRevisionNumber)
         setRevisionDate(nextRevisionDate)
-        setRows(applyCommonValuesToRows(nextRows, nextCommonValues))
-        setCommonValues(nextCommonValues)
+        setRows(
+          mode === 'variation'
+            ? applyVariationDefaultsToRows(
+                nextRows,
+                allRows,
+                selectedTenderNumber,
+                selectedVariationNumber
+              )
+            : applyCommonValuesToRows(nextRows, nextCommonValues)
+        )
+        setCommonValues(
+          mode === 'variation'
+            ? createEmptyCommonValues()
+            : nextCommonValues
+        )
       }
       setMessage(
         `Costing ${getRevisionLabel(approvedSnapshot.revisionNumber)} approved.`
@@ -470,7 +858,16 @@ export default function CostingClient() {
     if (!file) return
 
     if (!selectedTenderNumber) {
-      setError('Select a tender number before importing.')
+      setError(
+        mode === 'variation'
+          ? 'Select a project number before importing.'
+          : 'Select a tender number before importing.'
+      )
+      return
+    }
+
+    if (mode === 'variation' && !selectedVariationNumber) {
+      setError('Select a variation number before importing.')
       return
     }
 
@@ -488,22 +885,74 @@ export default function CostingClient() {
       })
       const importedRows = (data.rows || []).map(
         (row: Partial<BoqItem>, index: number) =>
-          applyCommonValuesToRow({
-          ...createEmptyRow(String(index + 1)),
-          sn: row.sn || String(index + 1),
-          tenderNumber: selectedTenderNumber,
-          revisionNumber: revisionNumber.trim(),
-          revisionDate: revisionDate || null,
-          clientsBoq: row.clientsBoq || '',
-          package: row.package || '',
-          description: row.description || '',
-          quantity: Number(row.quantity || 0),
-          freightCustomDutyPercent: Number(row.freightCustomDutyPercent || 0),
-          unit: row.unit || '',
-          }, commonValues)
+          mode === 'variation'
+            ? applyVariationDefaultsToRow(
+                {
+                  ...createEmptyRow(String(index + 1)),
+                  sn: row.sn || String(index + 1),
+                  tenderNumber: selectedTenderNumber,
+                  revisionNumber: revisionNumber.trim(),
+                  revisionDate: revisionDate || null,
+                  variationNumber: selectedVariationNumber,
+                  clientsBoq: row.clientsBoq || '',
+                  package: row.package || '',
+                  description: row.description || '',
+                  quantity: Number(row.quantity || 0),
+                  freightCustomDutyPercent: Number(
+                    row.freightCustomDutyPercent || 0
+                  ),
+                  unit: row.unit || '',
+                  remarks: row.remarks || '',
+                },
+                getVariationRowDefaults(
+                  allRows,
+                  selectedTenderNumber,
+                  selectedVariationNumber
+                )
+              )
+            : applyCommonValuesToRow(
+                {
+                  ...createEmptyRow(String(index + 1)),
+                  sn: row.sn || String(index + 1),
+                  tenderNumber: selectedTenderNumber,
+                  revisionNumber: revisionNumber.trim(),
+                  revisionDate: revisionDate || null,
+                  clientsBoq: row.clientsBoq || '',
+                  package: row.package || '',
+                  description: row.description || '',
+                  quantity: Number(row.quantity || 0),
+                  freightCustomDutyPercent: Number(
+                    row.freightCustomDutyPercent || 0
+                  ),
+                  unit: row.unit || '',
+                  remarks: row.remarks || '',
+                },
+                commonValues
+              )
       )
 
-      setRows(importedRows.length > 0 ? importedRows : [createEmptyRow()])
+      setRows(
+        importedRows.length > 0
+          ? importedRows
+          : [
+              mode === 'variation'
+                ? applyVariationDefaultsToRow(
+                    {
+                      ...createEmptyRow(),
+                      tenderNumber: selectedTenderNumber,
+                      revisionNumber: revisionNumber.trim(),
+                      revisionDate: revisionDate || null,
+                      variationNumber: selectedVariationNumber,
+                    },
+                    getVariationRowDefaults(
+                      allRows,
+                      selectedTenderNumber,
+                      selectedVariationNumber
+                    )
+                  )
+                : createEmptyRow(),
+            ]
+      )
       setMessage(
         `Imported ${importedRows.length} BOQ row${
           importedRows.length === 1 ? '' : 's'
@@ -518,7 +967,16 @@ export default function CostingClient() {
 
   function handleExportBoq() {
     if (!selectedTenderNumber) {
-      setError('Select a tender number before exporting.')
+      setError(
+        mode === 'variation'
+          ? 'Select a project number before exporting.'
+          : 'Select a tender number before exporting.'
+      )
+      return
+    }
+
+    if (mode === 'variation' && !selectedVariationNumber) {
+      setError('Select a variation number before exporting.')
       return
     }
 
@@ -532,11 +990,17 @@ export default function CostingClient() {
         'Unit',
         'Selling Rate',
         'Selling Amount',
+        'Remarks',
       ],
       ...rows
         .filter(
           (row) =>
-            row.clientsBoq || row.package || row.description || row.quantity || row.unit
+            row.clientsBoq ||
+            row.package ||
+            row.description ||
+            row.quantity ||
+            row.unit ||
+            row.remarks
         )
         .map((row, index) => {
           const summary = getRowSummary(row, costings, masterItems)
@@ -550,6 +1014,7 @@ export default function CostingClient() {
             row.unit,
             summary ? formatMoney(summary.sellingRate) : '',
             summary ? formatMoney(summary.sellingAmount) : '',
+            row.remarks,
           ]
         }),
     ]
@@ -576,9 +1041,13 @@ export default function CostingClient() {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     const revisionSuffix = revisionNumber ? `-rev-${revisionNumber}` : ''
+    const variationSuffix =
+      mode === 'variation' && selectedVariationNumber
+        ? `-variation-${selectedVariationNumber}`
+        : ''
 
     link.href = url
-    link.download = `${selectedTenderNumber}${revisionSuffix}-boq.xls`
+    link.download = `${selectedTenderNumber}${variationSuffix}${revisionSuffix}-boq.xls`
     link.click()
     window.URL.revokeObjectURL(url)
     setMessage('BOQ exported.')
@@ -645,30 +1114,83 @@ export default function CostingClient() {
   return (
     <div className="w-full min-w-0 max-w-full space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-bold text-slate-900">Costing</h1>
-        <p className="mt-2 text-slate-700">
-          Select a tender, enter the revision number, build the Bill of
-          Quantity, then open each row to enter costing details.
-        </p>
+        <h1 className="text-2xl font-bold text-slate-900">
+          {mode === 'variation' ? 'Variation Costing' : 'Costing'}
+        </h1>
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-          <Field label="Tender Number">
-            <select
-              value={selectedTenderNumber}
-              onChange={(e) => handleTenderChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-            >
-              <option value="">Select tender number</option>
-              {tenderNumbers.map((tenderNumber) => (
-                <option key={tenderNumber} value={tenderNumber}>
-                  {tenderNumber}
-                </option>
-              ))}
-            </select>
-          </Field>
+        <div
+          className={`grid grid-cols-1 gap-6 md:grid-cols-2 ${
+            mode === 'variation' ? 'xl:grid-cols-6' : 'xl:grid-cols-4'
+          }`}
+        >
+          {mode === 'variation' ? (
+            <>
+              <Field label="Project Number">
+                <select
+                  value={selectedProjectNumber}
+                  onChange={(e) => handleProjectNumberChange(e.target.value)}
+                  className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                    selectedProjectNumber ? 'text-black' : 'text-neutral-400'
+                  }`}
+                >
+                  <option value="">Select project number</option>
+                  {projectOptions.map((project) => (
+                    <option key={project.id} value={project.project_number}>
+                      {project.project_number}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Project Name">
+                <input
+                  value={selectedProjectName}
+                  readOnly
+                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900"
+                  placeholder="Project name"
+                />
+              </Field>
+            </>
+          ) : (
+            <Field label="Tender Number">
+              <select
+                value={selectedTenderNumber}
+                onChange={(e) => handleTenderChange(e.target.value)}
+                className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                  selectedTenderNumber ? 'text-black' : 'text-neutral-400'
+                }`}
+              >
+                <option value="">Select tender number</option>
+                {tenderNumbers.map((tenderNumber) => (
+                  <option key={tenderNumber} value={tenderNumber}>
+                    {tenderNumber}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          {mode === 'variation' ? (
+            <Field label="Variation Number">
+              <select
+                value={selectedVariationNumber}
+                onChange={(e) => handleVariationNumberChange(e.target.value)}
+                className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                  selectedVariationNumber ? 'text-black' : 'text-neutral-400'
+                }`}
+              >
+                <option value="">Select variation number</option>
+                {availableVariationNumbers.map((variationNumber) => (
+                  <option key={variationNumber} value={variationNumber}>
+                    {variationNumber}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : null}
 
           <Field label="Revision Number">
             <input
@@ -684,7 +1206,9 @@ export default function CostingClient() {
               type="date"
               value={revisionDate}
               onChange={(e) => setRevisionDate(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                revisionDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -698,7 +1222,7 @@ export default function CostingClient() {
               >
                 {submittingSnapshot ? 'Submitting...' : 'Submit'}
               </button>
-              {role === 'admin' &&
+              {hasRoleAccess(role, ['manager', 'admin']) &&
               matchingSnapshot &&
               matchingSnapshot.status !== 'approved' ? (
                 <button
@@ -735,50 +1259,52 @@ export default function CostingClient() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Common Values</h2>
-        <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
-          <Field label="Prelims %">
-            <NumberInput
-              value={commonValues.prelimsPercent || ''}
-              onChange={(value) => handleCommonValueChange('prelimsPercent', value)}
-              placeholder="Prelims"
-            />
-          </Field>
-          <Field label="FOH %">
-            <NumberInput
-              value={commonValues.fohPercent || ''}
-              onChange={(value) => handleCommonValueChange('fohPercent', value)}
-              placeholder="FOH"
-            />
-          </Field>
-          <Field label="Commitments %">
-            <NumberInput
-              value={commonValues.commitmentsPercent || ''}
-              onChange={(value) =>
-                handleCommonValueChange('commitmentsPercent', value)
-              }
-              placeholder="Commitments"
-            />
-          </Field>
-          <Field label="Contingencies %">
-            <NumberInput
-              value={commonValues.contingenciesPercent || ''}
-              onChange={(value) =>
-                handleCommonValueChange('contingenciesPercent', value)
-              }
-              placeholder="Contingencies"
-            />
-          </Field>
-          <Field label="Markup">
-            <NumberInput
-              value={commonValues.markup || ''}
-              onChange={(value) => handleCommonValueChange('markup', value)}
-              placeholder="Markup"
-            />
-          </Field>
+      {mode === 'original' ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Common Values</h2>
+          <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
+            <Field label="Prelims %">
+              <NumberInput
+                value={commonValues.prelimsPercent || ''}
+                onChange={(value) => handleCommonValueChange('prelimsPercent', value)}
+                placeholder="Prelims"
+              />
+            </Field>
+            <Field label="FOH %">
+              <NumberInput
+                value={commonValues.fohPercent || ''}
+                onChange={(value) => handleCommonValueChange('fohPercent', value)}
+                placeholder="FOH"
+              />
+            </Field>
+            <Field label="Commitments %">
+              <NumberInput
+                value={commonValues.commitmentsPercent || ''}
+                onChange={(value) =>
+                  handleCommonValueChange('commitmentsPercent', value)
+                }
+                placeholder="Commitments"
+              />
+            </Field>
+            <Field label="Contingencies %">
+              <NumberInput
+                value={commonValues.contingenciesPercent || ''}
+                onChange={(value) =>
+                  handleCommonValueChange('contingenciesPercent', value)
+                }
+                placeholder="Contingencies"
+              />
+            </Field>
+            <Field label="Markup">
+              <NumberInput
+                value={commonValues.markup || ''}
+                onChange={(value) => handleCommonValueChange('markup', value)}
+                placeholder="Markup"
+              />
+            </Field>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 p-6">
@@ -845,6 +1371,7 @@ export default function CostingClient() {
                 <th className="px-4 py-3 font-semibold">Markup</th>
                 <th className="px-4 py-3 font-semibold">Selling Rate</th>
                 <th className="px-4 py-3 font-semibold">Selling Amount</th>
+                <th className="px-4 py-3 font-semibold">Remarks</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -903,11 +1430,18 @@ export default function CostingClient() {
                     <StickyCell column={frozenColumns[6]} isLastFrozen>
                       {isSavedBoqRow(row) ? (
                         <Link
-                          href={`/estimation/costing/${encodeURIComponent(
-                            row.tenderNumber ||
+                          href={buildCostingDetailsHref({
+                            mode,
+                            tenderNumber:
+                              row.tenderNumber ||
                               selectedTenderNumber ||
-                              'tender-entry'
-                          )}?boqId=${row.id}`}
+                              'tender-entry',
+                            boqId: row.id,
+                            projectNumber: selectedProjectNumber,
+                            projectName: selectedProjectName,
+                            variationNumber: selectedVariationNumber,
+                            revisionNumber,
+                          })}
                           className="inline-flex rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-700"
                         >
                           Open
@@ -940,12 +1474,41 @@ export default function CostingClient() {
                       }
                       placeholder="Freight"
                     />
-                    <ReadOnlyPercentCell value={commonValues.prelimsPercent} />
+                    {mode === 'variation' ? (
+                      <PercentInputCell
+                        value={row.prelimsPercent || ''}
+                        onChange={(value) =>
+                          handleRowChange(row.id, 'prelimsPercent', value)
+                        }
+                        placeholder="Prelims"
+                      />
+                    ) : (
+                      <ReadOnlyPercentCell value={commonValues.prelimsPercent} />
+                    )}
                     <CostCell value={summary?.unitCost} />
                     <CostCell value={summary?.totalCost} />
-                    <ReadOnlyPercentCell value={commonValues.markup} />
+                    {mode === 'variation' ? (
+                      <PercentInputCell
+                        value={row.markup || ''}
+                        onChange={(value) =>
+                          handleRowChange(row.id, 'markup', value)
+                        }
+                        placeholder="Markup"
+                      />
+                    ) : (
+                      <ReadOnlyPercentCell value={commonValues.markup} />
+                    )}
                     <CostCell value={summary?.sellingRate} />
                     <CostCell value={summary?.sellingAmount} />
+                    <td className="px-2 py-3">
+                      <CompactInput
+                        value={row.remarks}
+                        onChange={(value) =>
+                          handleRowChange(row.id, 'remarks', value)
+                        }
+                        placeholder="Remarks"
+                      />
+                    </td>
                   </tr>
                 )
               })}
@@ -979,6 +1542,7 @@ export default function CostingClient() {
                 <BlankTotalCell />
                 <TotalCell value={tableTotals.sellingRate} />
                 <TotalCell value={tableTotals.sellingAmount} />
+                <BlankTotalCell />
               </tr>
             </tfoot>
           </table>
@@ -1208,25 +1772,27 @@ function getTenderNumbers(items: BoqItem[], tenderLogs: TenderLog[]) {
   return Array.from(
     new Set([
       ...tenderLogs.map((item) => item.tenderNumber),
-      ...items.map((item) => item.tenderNumber),
+      ...items
+        .filter((item) => !item.variationNumber)
+        .map((item) => item.tenderNumber),
     ].filter(Boolean))
   )
-}
-
-function getLatestRevision(items: BoqItem[], tenderNumber: string) {
-  return getRevisionNumbersForTender(items, tenderNumber).at(-1) || ''
 }
 
 function getDefaultRevisionNumber(
   items: BoqItem[],
   snapshots: CostingRevisionSnapshot[],
-  tenderNumber: string
+  tenderNumber: string,
+  variationNumber = ''
 ) {
-  const latestExistingRevision = getLatestRevision(items, tenderNumber)
+  const latestExistingRevision =
+    getRevisionNumbersForTender(items, tenderNumber, variationNumber).at(-1) || ''
   const latestApprovedRevision = snapshots
     .filter(
       (snapshot) =>
-        snapshot.tenderNumber === tenderNumber && snapshot.status === 'approved'
+        snapshot.tenderNumber === tenderNumber &&
+        snapshot.status === 'approved' &&
+        (snapshot.variationNumber || '') === variationNumber
     )
     .map((snapshot) => snapshot.revisionNumber)
     .sort(compareRevisionNumbers)
@@ -1262,9 +1828,15 @@ function incrementRevisionNumber(revisionNumber: string) {
 function getRowsForRevisionSelection(
   items: BoqItem[],
   tenderNumber: string,
-  revisionNumber: string
+  revisionNumber: string,
+  variationNumber = ''
 ) {
-  const existingRows = getRowsForTenderRevision(items, tenderNumber, revisionNumber)
+  const existingRows = getRowsForTenderRevision(
+    items,
+    tenderNumber,
+    revisionNumber,
+    variationNumber
+  )
   const hasExistingRows = existingRows.some(isSavedBoqRow)
 
   if (hasExistingRows) {
@@ -1274,11 +1846,17 @@ function getRowsForRevisionSelection(
   const previousRevisionRows = getPreviousRevisionRows(
     items,
     tenderNumber,
-    revisionNumber
+    revisionNumber,
+    variationNumber
   )
 
   if (previousRevisionRows.length > 0) {
-    return cloneRowsForRevision(previousRevisionRows, tenderNumber, revisionNumber)
+    return cloneRowsForRevision(
+      previousRevisionRows,
+      tenderNumber,
+      revisionNumber,
+      variationNumber
+    )
   }
 
   return existingRows
@@ -1287,13 +1865,15 @@ function getRowsForRevisionSelection(
 function getRowsForTenderRevision(
   items: BoqItem[],
   tenderNumber: string,
-  revisionNumber: string
+  revisionNumber: string,
+  variationNumber = ''
 ) {
   const tenderRows = items
     .filter(
       (row) =>
         row.tenderNumber === tenderNumber &&
-        row.revisionNumber === revisionNumber
+        row.revisionNumber === revisionNumber &&
+        (row.variationNumber || '') === variationNumber
     )
     .map((row, index) => ({
       ...row,
@@ -1308,6 +1888,7 @@ function getRowsForTenderRevision(
           tenderNumber,
           revisionNumber,
           revisionDate: null,
+          variationNumber,
         },
       ]
 }
@@ -1315,9 +1896,10 @@ function getRowsForTenderRevision(
 function getPreviousRevisionRows(
   items: BoqItem[],
   tenderNumber: string,
-  targetRevision: string
+  targetRevision: string,
+  variationNumber = ''
 ) {
-  const revisions = getRevisionNumbersForTender(items, tenderNumber)
+  const revisions = getRevisionNumbersForTender(items, tenderNumber, variationNumber)
   const normalizedTarget = String(targetRevision || '').trim()
   const previousRevision =
     revisions.filter((revision) =>
@@ -1327,29 +1909,39 @@ function getPreviousRevisionRows(
     ''
 
   return previousRevision
-    ? getRowsForTenderRevision(items, tenderNumber, previousRevision)
+    ? getRowsForTenderRevision(items, tenderNumber, previousRevision, variationNumber)
     : []
 }
 
 function getRevisionDate(
   items: BoqItem[],
   tenderNumber: string,
-  revisionNumber: string
+  revisionNumber: string,
+  variationNumber = ''
 ) {
   return (
     items.find(
       (item) =>
         item.tenderNumber === tenderNumber &&
         item.revisionNumber === revisionNumber &&
+        (item.variationNumber || '') === variationNumber &&
         item.revisionDate
     )?.revisionDate || ''
   )
 }
 
-function getRevisionNumbersForTender(items: BoqItem[], tenderNumber: string) {
+function getRevisionNumbersForTender(
+  items: BoqItem[],
+  tenderNumber: string,
+  variationNumber = ''
+) {
   return [...new Set(
     items
-      .filter((item) => item.tenderNumber === tenderNumber)
+      .filter(
+        (item) =>
+          item.tenderNumber === tenderNumber &&
+          (item.variationNumber || '') === variationNumber
+      )
       .map((item) => String(item.revisionNumber || '').trim())
   )].sort(compareRevisionNumbers)
 }
@@ -1370,7 +1962,8 @@ function compareRevisionNumbers(left: string, right: string) {
 function cloneRowsForRevision(
   sourceRows: BoqItem[],
   tenderNumber: string,
-  revisionNumber: string
+  revisionNumber: string,
+  variationNumber = ''
 ) {
   return sourceRows.map((row, index) => ({
     ...row,
@@ -1379,6 +1972,7 @@ function cloneRowsForRevision(
     tenderNumber,
     revisionNumber,
     revisionDate: null,
+    variationNumber,
   }))
 }
 
@@ -1386,8 +1980,139 @@ function getRevisionLabel(revisionNumber: string) {
   return revisionNumber ? revisionNumber : 'Current Revision'
 }
 
+function buildCostingDetailsHref({
+  mode,
+  tenderNumber,
+  boqId,
+  projectNumber,
+  projectName,
+  variationNumber,
+  revisionNumber,
+}: {
+  mode: 'original' | 'variation'
+  tenderNumber: string
+  boqId: string | number
+  projectNumber: string
+  projectName: string
+  variationNumber: string
+  revisionNumber: string
+}) {
+  const basePath =
+    mode === 'variation'
+      ? '/contract/variation-costing'
+      : '/estimation/costing'
+  const params = new URLSearchParams({
+    boqId: String(boqId),
+  })
+
+  if (mode === 'variation') {
+    if (projectNumber) {
+      params.set('projectNumber', projectNumber)
+    }
+
+    if (projectName) {
+      params.set('projectName', projectName)
+    }
+
+    if (tenderNumber) {
+      params.set('tenderNumber', tenderNumber)
+    }
+
+    if (variationNumber) {
+      params.set('variationNumber', variationNumber)
+    }
+
+    if (revisionNumber) {
+      params.set('revisionNumber', revisionNumber)
+    }
+  }
+
+  return `${basePath}/${encodeURIComponent(tenderNumber)}?${params.toString()}`
+}
+
 function getTenderProjectName(tenderLogs: TenderLog[], tenderNumber: string) {
   return tenderLogs.find((tender) => tender.tenderNumber === tenderNumber)?.projectName || ''
+}
+
+function getVariationNumbersForProject(
+  variationLogs: ContractVariationLog[],
+  projectNumber: string
+) {
+  return Array.from(
+    new Set(
+      variationLogs
+        .filter((log) => log.projectNumber === projectNumber)
+        .map((log) => normalizeVariationNumber(log.rfvNumber))
+        .filter(Boolean)
+    )
+  ).sort(compareVariationNumbers)
+}
+
+function getVariationRowDefaults(
+  items: BoqItem[],
+  tenderNumber: string,
+  variationNumber: string
+) {
+  const originalRows = getRowsForTenderRevision(
+    items.filter((item) => !item.variationNumber),
+    tenderNumber,
+    getRevisionNumbersForTender(items, tenderNumber).at(-1) || 'R0',
+    ''
+  )
+  const firstOriginalRow = originalRows.find(
+    (row) => row.description || row.clientsBoq || row.quantity || row.unit
+  )
+
+  return {
+    tenderNumber,
+    variationNumber,
+    prelimsPercent: Number(firstOriginalRow?.prelimsPercent || 0),
+    markup: Number(firstOriginalRow?.markup || 0),
+  }
+}
+
+function applyVariationDefaultsToRow(
+  row: BoqItem,
+  defaults:
+    | {
+        tenderNumber: string
+        variationNumber: string
+        prelimsPercent: number
+        markup: number
+      }
+    | null
+) {
+  if (!defaults) {
+    return row
+  }
+
+  return {
+    ...row,
+    tenderNumber: defaults.tenderNumber || row.tenderNumber,
+    variationNumber: defaults.variationNumber || row.variationNumber,
+    prelimsPercent: Number(row.prelimsPercent || defaults.prelimsPercent || 0),
+    markup: Number(row.markup || defaults.markup || 0),
+  }
+}
+
+function applyVariationDefaultsToRows(
+  rows: BoqItem[],
+  items: BoqItem[],
+  tenderNumber: string,
+  variationNumber: string
+) {
+  const defaults = getVariationRowDefaults(items, tenderNumber, variationNumber)
+
+  return rows.map((row) =>
+    applyVariationDefaultsToRow(
+      {
+        ...row,
+        tenderNumber: tenderNumber || row.tenderNumber,
+        variationNumber: variationNumber || row.variationNumber,
+      },
+      defaults
+    )
+  )
 }
 
 function upsertCostingSnapshot(
@@ -1570,7 +2295,7 @@ function applyCommonValuesToRows(rows: BoqItem[], commonValues: CommonValues) {
 }
 
 function isNumericBoqField(field: keyof BoqItem): field is NumericBoqField {
-  return ['quantity', 'freightCustomDutyPercent'].includes(field)
+  return ['quantity', 'freightCustomDutyPercent', 'prelimsPercent', 'markup'].includes(field)
 }
 
 function escapeHtmlValue(value: string | number) {

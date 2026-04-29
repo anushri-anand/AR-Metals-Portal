@@ -8,6 +8,7 @@ from shared.company import CurrentCompanyDefault
 
 from .models import (
     BoqItem,
+    ClientContact,
     ClientData,
     CostingRevisionSnapshot,
     ContractPaymentLog,
@@ -48,6 +49,20 @@ LABOUR_ROLE_NAME_MAP = {
 }
 
 
+def normalize_variation_number(value):
+    text = str(value or '').strip()
+
+    if not text:
+        return ''
+
+    numbers = re.findall(r'\d+', text)
+
+    if numbers:
+        return f'RFV #{int(numbers[-1])}'
+
+    return text
+
+
 def get_tender_status_options():
     return [
         {'value': value, 'label': label}
@@ -59,6 +74,7 @@ def get_latest_revision_summary(tender_number, company=None):
     boq_items = list(
         BoqItem.objects.filter(
             tender_number=tender_number,
+            variation_number='',
             **({'company': company} if company else {}),
         )
         .select_related('costing')
@@ -120,36 +136,37 @@ def calculate_boq_item_selling_amount(boq_item):
     estimate_lines = list(costing.estimate_lines.all())
     labour_lines = list(costing.labour_lines.all())
 
+    pro_rata_factor = Decimal(getattr(costing, 'pro_rata_factor', 1) or 1)
     material_unit_cost = get_estimate_line_amount(
         estimate_lines,
         EstimateCostLine.MATERIAL,
         include_wastage=True,
-    )
+    ) * pro_rata_factor
     production_labour_unit_cost = get_labour_line_amount(
         labour_lines,
         LabourCostLine.PRODUCTION_LABOUR,
-    )
+    ) * pro_rata_factor
     machining_unit_cost = get_estimate_line_amount(
         estimate_lines,
         EstimateCostLine.MACHINING,
-    )
+    ) * pro_rata_factor
     coating_unit_cost = get_estimate_line_amount(
         estimate_lines,
         EstimateCostLine.COATING,
-    )
+    ) * pro_rata_factor
     consumable_unit_cost = get_estimate_line_amount(
         estimate_lines,
         EstimateCostLine.CONSUMABLE,
         include_wastage=True,
-    )
+    ) * pro_rata_factor
     subcontract_unit_cost = get_estimate_line_amount(
         estimate_lines,
         EstimateCostLine.SUBCONTRACT,
-    )
+    ) * pro_rata_factor
     installation_unit_cost = get_labour_line_amount(
         labour_lines,
         LabourCostLine.INSTALLATION_LABOUR,
-    )
+    ) * pro_rata_factor
     base_unit_cost = (
         material_unit_cost
         + production_labour_unit_cost
@@ -180,7 +197,12 @@ def get_estimate_line_amount(estimate_lines, category, include_wastage=False):
         if include_wastage:
             quantity = quantity + (quantity * line.wastage_percent / Decimal('100'))
 
-        total += quantity * line.item.rate
+        rate = (
+            line.rate_override
+            if line.rate_override is not None
+            else line.item.rate
+        )
+        total += quantity * rate
 
     return total
 
@@ -261,8 +283,18 @@ class MasterListItemSerializer(serializers.ModelSerializer):
 class ClientDataSerializer(serializers.ModelSerializer):
     company = serializers.HiddenField(default=CurrentCompanyDefault())
     clientName = serializers.CharField(source='client_name')
+    customerId = serializers.CharField(
+        source='customer_id',
+        required=False,
+        allow_blank=True,
+    )
     supplierTrnNo = serializers.CharField(
         source='supplier_trn_no',
+        required=False,
+        allow_blank=True,
+    )
+    poBox = serializers.CharField(
+        source='po_box',
         required=False,
         allow_blank=True,
     )
@@ -281,6 +313,7 @@ class ClientDataSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
     )
+    contacts = serializers.SerializerMethodField()
 
     class Meta:
         model = ClientData
@@ -288,18 +321,149 @@ class ClientDataSerializer(serializers.ModelSerializer):
             'id',
             'company',
             'clientName',
+            'customerId',
             'supplierTrnNo',
+            'poBox',
             'country',
             'city',
             'contactPerson',
             'mobileNumber',
             'companyTelNumber',
             'email',
+            'contacts',
             'remarks',
             'created_at',
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        contacts = list(instance.contacts.all())
+        primary_contact = contacts[0] if contacts else None
+
+        data['contactPerson'] = (
+            primary_contact.name if primary_contact and primary_contact.name else instance.contact_person
+        )
+        data['mobileNumber'] = (
+            primary_contact.mobile_number
+            if primary_contact and primary_contact.mobile_number
+            else instance.mobile_number
+        )
+        data['email'] = (
+            primary_contact.email if primary_contact and primary_contact.email else instance.email
+        )
+        data['contacts'] = [
+            {
+                'id': contact.id,
+                'name': contact.name,
+                'mobileNumber': contact.mobile_number,
+                'email': contact.email,
+            }
+            for contact in contacts
+        ]
+        return data
+
+    def create(self, validated_data):
+        contacts_data = self.initial_data.get('contacts') or []
+        client = ClientData.objects.create(**validated_data)
+        self._replace_contacts(client, contacts_data)
+        self._sync_primary_contact_fields(client)
+        return client
+
+    def update(self, instance, validated_data):
+        contacts_data = self.initial_data.get('contacts', serializers.empty)
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+
+        instance.save()
+
+        if contacts_data is not serializers.empty:
+            self._replace_contacts(instance, contacts_data or [])
+        elif any(
+            key in self.initial_data
+            for key in ('contactPerson', 'mobileNumber', 'email')
+        ):
+            primary_contact = instance.contacts.order_by('id').first()
+            contact_payload = {
+                'name': self.initial_data.get('contactPerson', ''),
+                'mobileNumber': self.initial_data.get('mobileNumber', ''),
+                'email': self.initial_data.get('email', ''),
+            }
+
+            if primary_contact:
+                primary_contact.name = str(contact_payload['name'] or '').strip()
+                primary_contact.mobile_number = str(contact_payload['mobileNumber'] or '').strip()
+                primary_contact.email = str(contact_payload['email'] or '').strip()
+                primary_contact.save(update_fields=['name', 'mobile_number', 'email', 'updated_at'])
+            elif any(str(value or '').strip() for value in contact_payload.values()):
+                ClientContact.objects.create(
+                    client=instance,
+                    name=str(contact_payload['name'] or '').strip(),
+                    mobile_number=str(contact_payload['mobileNumber'] or '').strip(),
+                    email=str(contact_payload['email'] or '').strip(),
+                )
+
+        self._sync_primary_contact_fields(instance)
+        return instance
+
+    def _replace_contacts(self, client, contacts_data):
+        client.contacts.all().delete()
+
+        normalized_contacts = []
+        for contact in contacts_data:
+            name = str(contact.get('name', '')).strip()
+            mobile_number = str(contact.get('mobileNumber', '')).strip()
+            email = str(contact.get('email', '')).strip()
+
+            if not any([name, mobile_number, email]):
+                continue
+
+            normalized_contacts.append(
+                ClientContact(
+                    client=client,
+                    name=name,
+                    mobile_number=mobile_number,
+                    email=email,
+                )
+            )
+
+        if not normalized_contacts:
+            legacy_name = str(self.initial_data.get('contactPerson', '')).strip()
+            legacy_mobile = str(self.initial_data.get('mobileNumber', '')).strip()
+            legacy_email = str(self.initial_data.get('email', '')).strip()
+
+            if any([legacy_name, legacy_mobile, legacy_email]):
+                normalized_contacts.append(
+                    ClientContact(
+                        client=client,
+                        name=legacy_name,
+                        mobile_number=legacy_mobile,
+                        email=legacy_email,
+                    )
+                )
+
+        if normalized_contacts:
+            ClientContact.objects.bulk_create(normalized_contacts)
+
+    def _sync_primary_contact_fields(self, client):
+        primary_contact = client.contacts.order_by('id').first()
+        client.contact_person = primary_contact.name if primary_contact else ''
+        client.mobile_number = primary_contact.mobile_number if primary_contact else ''
+        client.email = primary_contact.email if primary_contact else ''
+        client.save(update_fields=['contact_person', 'mobile_number', 'email', 'updated_at'])
+
+    def get_contacts(self, obj):
+        return [
+            {
+                'id': contact.id,
+                'name': contact.name,
+                'mobileNumber': contact.mobile_number,
+                'email': contact.email,
+            }
+            for contact in obj.contacts.all()
+        ]
 
 
 class TenderLogSerializer(serializers.ModelSerializer):
@@ -321,6 +485,11 @@ class TenderLogSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     clientId = serializers.IntegerField(required=False, allow_null=True, write_only=True)
+    contactId = serializers.IntegerField(
+        source='client_contact_id',
+        required=False,
+        allow_null=True,
+    )
     clientName = serializers.SerializerMethodField()
     contactName = serializers.SerializerMethodField()
     projectName = serializers.CharField(
@@ -372,6 +541,7 @@ class TenderLogSerializer(serializers.ModelSerializer):
             'revisionNumber',
             'revisionDate',
             'clientId',
+            'contactId',
             'clientName',
             'contactName',
             'projectName',
@@ -393,6 +563,11 @@ class TenderLogSerializer(serializers.ModelSerializer):
         return obj.client.client_name if obj.client else ''
 
     def get_contactName(self, obj):
+        if obj.client_contact:
+            return obj.client_contact.name
+        if obj.client and obj.client.contacts.exists():
+            primary_contact = obj.client.contacts.order_by('id').first()
+            return primary_contact.name if primary_contact else obj.client.contact_person
         return obj.client.contact_person if obj.client else ''
 
     def to_representation(self, instance):
@@ -422,23 +597,43 @@ class TenderLogSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         client_id = validated_data.pop('clientId', None)
+        contact_id = validated_data.pop('client_contact_id', None)
         company = validated_data.get('company')
         client = (
             ClientData.objects.filter(company=company, id=client_id).first()
             if client_id
             else None
         )
+        contact = (
+            ClientContact.objects.filter(client=client, id=contact_id).first()
+            if client and contact_id
+            else client.contacts.order_by('id').first() if client else None
+        )
 
-        return TenderLog.objects.create(client=client, **validated_data)
+        return TenderLog.objects.create(
+            client=client,
+            client_contact=contact,
+            **validated_data,
+        )
 
     def update(self, instance, validated_data):
         client_id = validated_data.pop('clientId', None)
+        contact_id = validated_data.pop('client_contact_id', serializers.empty)
 
         if client_id is not None:
             instance.client = (
                 ClientData.objects.filter(company=instance.company, id=client_id).first()
                 if client_id
                 else None
+            )
+            if instance.client is None:
+                instance.client_contact = None
+
+        if contact_id is not serializers.empty:
+            instance.client_contact = (
+                ClientContact.objects.filter(client=instance.client, id=contact_id).first()
+                if instance.client and contact_id
+                else instance.client.contacts.order_by('id').first() if instance.client else None
             )
 
         for field, value in validated_data.items():
@@ -451,6 +646,37 @@ class TenderLogSerializer(serializers.ModelSerializer):
 class ContractRevenueVariationSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
     variationNumber = serializers.CharField(source='variation_number')
+    material = serializers.DecimalField(max_digits=16, decimal_places=2, required=False)
+    machining = serializers.DecimalField(max_digits=16, decimal_places=2, required=False)
+    coating = serializers.DecimalField(max_digits=16, decimal_places=2, required=False)
+    consumables = serializers.DecimalField(max_digits=16, decimal_places=2, required=False)
+    subcontracts = serializers.DecimalField(max_digits=16, decimal_places=2, required=False)
+    productionLabour = serializers.DecimalField(
+        source='production_labour',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    freightCustom = serializers.DecimalField(
+        source='freight_custom',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    installationLabour = serializers.DecimalField(
+        source='installation_labour',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
+    prelims = serializers.DecimalField(max_digits=16, decimal_places=2, required=False)
+    foh = serializers.DecimalField(max_digits=16, decimal_places=2, required=False)
+    commitments = serializers.DecimalField(max_digits=16, decimal_places=2, required=False)
+    contingencies = serializers.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
 
     class Meta:
         model = ContractRevenueVariation
@@ -458,6 +684,18 @@ class ContractRevenueVariationSerializer(serializers.ModelSerializer):
             'id',
             'variationNumber',
             'amount',
+            'material',
+            'machining',
+            'coating',
+            'consumables',
+            'subcontracts',
+            'productionLabour',
+            'freightCustom',
+            'installationLabour',
+            'prelims',
+            'foh',
+            'commitments',
+            'contingencies',
             'created_at',
             'updated_at',
         ]
@@ -468,6 +706,11 @@ class ContractRevenueSerializer(serializers.ModelSerializer):
     company = serializers.HiddenField(default=CurrentCompanyDefault())
     projectNumber = serializers.CharField(source='project_number')
     projectName = serializers.CharField(source='project_name')
+    contractRef = serializers.CharField(
+        source='contract_ref',
+        required=False,
+        allow_blank=True,
+    )
     contractValue = serializers.DecimalField(
         source='contract_value',
         max_digits=16,
@@ -555,6 +798,12 @@ class ContractRevenueSerializer(serializers.ModelSerializer):
         decimal_places=2,
         required=False,
     )
+    agreedVariationTotal = serializers.DecimalField(
+        source='agreed_variation_total',
+        max_digits=16,
+        decimal_places=2,
+        required=False,
+    )
     variationBudgetMaterial = serializers.DecimalField(
         source='variation_budget_material',
         max_digits=16,
@@ -636,6 +885,7 @@ class ContractRevenueSerializer(serializers.ModelSerializer):
             'company',
             'projectNumber',
             'projectName',
+            'contractRef',
             'contractValue',
             'startDate',
             'completionDate',
@@ -651,6 +901,7 @@ class ContractRevenueSerializer(serializers.ModelSerializer):
             'budgetFoh',
             'budgetCommitments',
             'budgetContingencies',
+            'agreedVariationTotal',
             'variationBudgetMaterial',
             'variationBudgetMachining',
             'variationBudgetCoating',
@@ -697,6 +948,22 @@ class ContractRevenueSerializer(serializers.ModelSerializer):
                 revenue=revenue,
                 variation_number=variation_number,
                 amount=variation_data.get('amount') or Decimal('0.00'),
+                material=variation_data.get('material') or Decimal('0.00'),
+                machining=variation_data.get('machining') or Decimal('0.00'),
+                coating=variation_data.get('coating') or Decimal('0.00'),
+                consumables=variation_data.get('consumables') or Decimal('0.00'),
+                subcontracts=variation_data.get('subcontracts') or Decimal('0.00'),
+                production_labour=variation_data.get('production_labour')
+                or Decimal('0.00'),
+                freight_custom=variation_data.get('freight_custom')
+                or Decimal('0.00'),
+                installation_labour=variation_data.get('installation_labour')
+                or Decimal('0.00'),
+                prelims=variation_data.get('prelims') or Decimal('0.00'),
+                foh=variation_data.get('foh') or Decimal('0.00'),
+                commitments=variation_data.get('commitments') or Decimal('0.00'),
+                contingencies=variation_data.get('contingencies')
+                or Decimal('0.00'),
             )
 
 
@@ -775,6 +1042,14 @@ class ContractVariationLogSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        attrs['rfv_number'] = normalize_variation_number(attrs.get('rfv_number', ''))
+        attrs['client_variation_number'] = str(
+            attrs.get('client_variation_number', '') or ''
+        ).strip()
+        return attrs
 
 
 def calculate_contract_payment_net(
@@ -1032,6 +1307,12 @@ class BoqItemSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    variationNumber = serializers.CharField(
+        source='variation_number',
+        required=False,
+        allow_blank=True,
+        default='',
+    )
     clientsBoq = serializers.CharField(
         source='clients_boq',
         required=False,
@@ -1083,6 +1364,7 @@ class BoqItemSerializer(serializers.ModelSerializer):
             'tenderNumber',
             'revisionNumber',
             'revisionDate',
+            'variationNumber',
             'clientsBoq',
             'package',
             'description',
@@ -1094,6 +1376,7 @@ class BoqItemSerializer(serializers.ModelSerializer):
             'commitmentsPercent',
             'contingenciesPercent',
             'markup',
+            'remarks',
             'created_at',
             'updated_at',
         ]
@@ -1111,6 +1394,7 @@ class CostingRevisionSnapshotSerializer(serializers.ModelSerializer):
             'tender_number',
             'project_name',
             'revision_number',
+            'variation_number',
             'status',
             'submitted_by',
             'approved_by',
@@ -1146,11 +1430,18 @@ class CostingRevisionSnapshotEntrySerializer(serializers.Serializer):
         allow_blank=True,
         default='',
     )
+    variation_number = serializers.CharField(
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        default='',
+    )
 
     def validate(self, attrs):
         attrs['tender_number'] = (attrs.get('tender_number') or '').strip()
         attrs['project_name'] = (attrs.get('project_name') or '').strip()
         attrs['revision_number'] = (attrs.get('revision_number') or '').strip()
+        attrs['variation_number'] = (attrs.get('variation_number') or '').strip()
 
         if not attrs['tender_number']:
             raise serializers.ValidationError(
@@ -1167,6 +1458,7 @@ def serialize_tender_costing(costing):
         'id': costing.id,
         'boqItemId': boq_item.id,
         'tenderNumber': boq_item.tender_number,
+        'proRataFactor': costing.pro_rata_factor,
         'material': serialize_estimate_lines(costing, EstimateCostLine.MATERIAL),
         'productionLabour': serialize_labour_lines(
             costing,
@@ -1196,6 +1488,7 @@ def serialize_estimate_lines(costing, category):
             'itemId': line.item_id if line else '',
             'quantity': line.quantity if line else Decimal('0.00'),
             'wastagePercent': line.wastage_percent if line else Decimal('0.00'),
+            'rate': line.rate_override if line and line.rate_override is not None else None,
         }
         for line in costing.estimate_lines.filter(category=category)
         .select_related('item')
@@ -1229,6 +1522,8 @@ def serialize_stage_labour_line(lines, stage):
 def save_tender_costing(boq_item, data):
     costing, _ = TenderCosting.objects.get_or_create(boq_item=boq_item)
     company = boq_item.company
+    costing.pro_rata_factor = to_decimal(data.get('proRataFactor') or 1)
+    costing.save(update_fields=['pro_rata_factor', 'updated_at'])
 
     save_estimate_lines(costing, EstimateCostLine.MATERIAL, data.get('material', []))
     save_estimate_lines(costing, EstimateCostLine.MACHINING, data.get('machining', []))
@@ -1268,6 +1563,7 @@ def save_estimate_lines(costing, category, data):
         item = get_master_item(row.get('itemId'))
         quantity = to_decimal(row.get('quantity'))
         wastage_percent = to_decimal(row.get('wastagePercent'))
+        rate_override = to_decimal_or_none(row.get('rate'))
 
         if not item and quantity == Decimal('0.00') and wastage_percent == Decimal('0.00'):
             continue
@@ -1278,6 +1574,7 @@ def save_estimate_lines(costing, category, data):
             item=item,
             quantity=quantity,
             wastage_percent=wastage_percent,
+            rate_override=rate_override,
         )
 
 
@@ -1362,3 +1659,13 @@ def to_decimal(value):
         return Decimal(str(value))
     except Exception:
         return Decimal('0.00')
+
+
+def to_decimal_or_none(value):
+    if value in (None, ''):
+        return None
+
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None

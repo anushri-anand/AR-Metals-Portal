@@ -11,10 +11,14 @@ class Vendor(models.Model):
         db_index=True,
     )
     supplier_name = models.CharField(max_length=255)
+    vendor_id = models.CharField(max_length=100, blank=True, default='')
+    trn_no = models.CharField(max_length=100, blank=True, default='')
+    po_box = models.CharField(max_length=100, blank=True, default='')
     country = models.CharField(max_length=100)
     city = models.CharField(max_length=100)
     contact_person_name = models.CharField(max_length=255)
     mobile_number = models.CharField(max_length=50, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
     company_telephone = models.CharField(max_length=50, blank=True, default='')
     product_details = models.TextField(blank=True, default='')
     review = models.TextField(blank=True, default='')
@@ -27,6 +31,25 @@ class Vendor(models.Model):
 
     def __str__(self):
         return self.supplier_name
+
+
+class VendorContact(models.Model):
+    vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.CASCADE,
+        related_name='contacts',
+    )
+    name = models.CharField(max_length=255, blank=True, default='')
+    mobile_number = models.CharField(max_length=50, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return self.name or self.vendor.supplier_name
 
 
 class PurchaseOrder(models.Model):

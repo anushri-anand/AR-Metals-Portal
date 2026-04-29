@@ -24,12 +24,14 @@ from .views import (
     PurchaseOrderEntryAPIView,
     PurchaseOrderListAPIView,
     VendorEntryAPIView,
+    VendorDetailAPIView,
     VendorListAPIView,
 )
 
 urlpatterns = [
     path('vendor-data/entry/', VendorEntryAPIView.as_view(), name='vendor-entry'),
     path('vendor-data/', VendorListAPIView.as_view(), name='vendor-list'),
+    path('vendor-data/<int:pk>/', VendorDetailAPIView.as_view(), name='vendor-detail'),
 
     path('purchase-order/entry/', PurchaseOrderEntryAPIView.as_view(), name='purchase-order-entry'),
     path('purchase-order/', PurchaseOrderListAPIView.as_view(), name='purchase-order-list'),

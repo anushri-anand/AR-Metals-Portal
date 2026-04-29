@@ -114,9 +114,6 @@ export default function AdvanceForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Advance</h1>
-        <p className="mt-2 text-slate-700">
-          Enter employee salary advance details.
-        </p>
       </div>
 
       <form
@@ -128,7 +125,9 @@ export default function AdvanceForm() {
             <select
               value={form.employeeId}
               onChange={(e) => handleEmployeeIdChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.employeeId ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select employee ID</option>
@@ -144,7 +143,9 @@ export default function AdvanceForm() {
             <select
               value={form.employeeName}
               onChange={(e) => handleEmployeeNameChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.employeeName ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select employee name</option>
@@ -162,7 +163,9 @@ export default function AdvanceForm() {
               name="advanceDate"
               value={form.advanceDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.advanceDate ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>

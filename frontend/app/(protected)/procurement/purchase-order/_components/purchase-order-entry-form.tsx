@@ -56,7 +56,6 @@ type FormState = {
 
 type PurchaseOrderEntryFormProps = {
   title: string
-  description: string
   successMessage: string
   orderType: 'project' | 'asset' | 'inventory'
   includeDepreciation?: boolean
@@ -122,7 +121,6 @@ function normalizeItemState(item?: Partial<PurchaseOrderItem>): PurchaseOrderIte
 
 export default function PurchaseOrderEntryForm({
   title,
-  description,
   successMessage,
   orderType,
   includeDepreciation = false,
@@ -537,11 +535,6 @@ export default function PurchaseOrderEntryForm({
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
-        <p className="mt-2 text-slate-700">{description}</p>
-        <p className="mt-3 text-sm text-slate-500">
-          `Save` keeps the PO as draft, `Draft` opens the PDF preview, and `Submit`
-          sends it to admin approval.
-        </p>
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       </div>
 
@@ -571,7 +564,9 @@ export default function PurchaseOrderEntryForm({
               name="costCode"
               value={form.costCode}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.costCode ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select cost code</option>
@@ -589,7 +584,9 @@ export default function PurchaseOrderEntryForm({
               value={form.accountCode}
               onChange={handleChange}
               disabled={!form.costCode || !requiresManualAccountCode(form.costCode)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 disabled:bg-slate-50 disabled:text-slate-500"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-50 disabled:text-slate-500 ${
+                form.accountCode ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">
@@ -613,7 +610,9 @@ export default function PurchaseOrderEntryForm({
               name="poDateOriginal"
               value={form.poDateOriginal}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.poDateOriginal ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             />
           </Field>
@@ -624,7 +623,9 @@ export default function PurchaseOrderEntryForm({
               name="poDateRevised"
               value={form.poDateRevised}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.poDateRevised ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -643,7 +644,9 @@ export default function PurchaseOrderEntryForm({
               name="supplierName"
               value={form.supplierName}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.supplierName ? 'text-black' : 'text-neutral-400'
+              }`}
               required
               disabled={loadingVendors}
             >
@@ -884,7 +887,9 @@ export default function PurchaseOrderEntryForm({
               name="modeOfPayment"
               value={form.modeOfPayment}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.modeOfPayment ? 'text-black' : 'text-neutral-400'
+              }`}
               required
             >
               <option value="">Select mode of payment</option>

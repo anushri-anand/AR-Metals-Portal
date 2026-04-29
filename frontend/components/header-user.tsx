@@ -66,7 +66,6 @@ export default function HeaderUser() {
             </div>
           )}
           <div className="text-sm font-medium text-slate-900">{user.username}</div>
-          <div className="text-xs uppercase tracking-wide text-slate-500">{user.role}</div>
         </div>
       )}
 

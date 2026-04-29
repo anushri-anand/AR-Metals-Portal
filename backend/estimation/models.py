@@ -39,7 +39,9 @@ class ClientData(models.Model):
         db_index=True,
     )
     client_name = models.CharField(max_length=255)
+    customer_id = models.CharField(max_length=100, blank=True, default='')
     supplier_trn_no = models.CharField(max_length=100, blank=True, default='')
+    po_box = models.CharField(max_length=100, blank=True, default='')
     country = models.CharField(max_length=100, blank=True, default='')
     city = models.CharField(max_length=100, blank=True, default='')
     contact_person = models.CharField(max_length=255, blank=True, default='')
@@ -56,6 +58,25 @@ class ClientData(models.Model):
 
     def __str__(self):
         return self.client_name
+
+
+class ClientContact(models.Model):
+    client = models.ForeignKey(
+        ClientData,
+        on_delete=models.CASCADE,
+        related_name='contacts',
+    )
+    name = models.CharField(max_length=255, blank=True, default='')
+    mobile_number = models.CharField(max_length=50, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return self.name or f'Contact {self.pk}'
 
 
 class TenderLog(models.Model):
@@ -115,6 +136,13 @@ class TenderLog(models.Model):
         null=True,
         blank=True,
     )
+    client_contact = models.ForeignKey(
+        ClientContact,
+        on_delete=models.SET_NULL,
+        related_name='tenders',
+        null=True,
+        blank=True,
+    )
     project_name = models.CharField(max_length=255, blank=True, default='')
     project_location = models.CharField(max_length=255, blank=True, default='')
     geography = models.CharField(
@@ -159,6 +187,7 @@ class BoqItem(models.Model):
     tender_number = models.CharField(max_length=100, db_index=True)
     revision_number = models.CharField(max_length=50, blank=True, default='')
     revision_date = models.DateField(null=True, blank=True)
+    variation_number = models.CharField(max_length=100, blank=True, default='', db_index=True)
     clients_boq = models.CharField(max_length=255, blank=True, default='')
     package = models.CharField(max_length=255, blank=True, default='')
     description = models.TextField(blank=True, default='')
@@ -174,6 +203,7 @@ class BoqItem(models.Model):
     commitments_percent = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     contingencies_percent = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     markup = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    remarks = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -190,6 +220,7 @@ class TenderCosting(models.Model):
         on_delete=models.CASCADE,
         related_name='costing',
     )
+    pro_rata_factor = models.DecimalField(max_digits=10, decimal_places=4, default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -218,6 +249,7 @@ class CostingRevisionSnapshot(models.Model):
     tender_number = models.CharField(max_length=100, db_index=True)
     project_name = models.CharField(max_length=255, blank=True, default='')
     revision_number = models.CharField(max_length=50, blank=True, default='', db_index=True)
+    variation_number = models.CharField(max_length=100, blank=True, default='', db_index=True)
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -233,7 +265,7 @@ class CostingRevisionSnapshot(models.Model):
 
     class Meta:
         ordering = ['tender_number', 'revision_number', '-submitted_at', '-id']
-        unique_together = ('company', 'tender_number', 'revision_number')
+        unique_together = ('company', 'tender_number', 'revision_number', 'variation_number')
 
     def __str__(self):
         return f'{self.tender_number} {self.revision_number or "Current"} - {self.status}'
@@ -269,6 +301,12 @@ class EstimateCostLine(models.Model):
     )
     quantity = models.DecimalField(max_digits=14, decimal_places=6, default=0)
     wastage_percent = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    rate_override = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         ordering = ['costing', 'category','id']
@@ -340,6 +378,7 @@ class ContractRevenue(models.Model):
     )
     project_number = models.CharField(max_length=100)
     project_name = models.CharField(max_length=255)
+    contract_ref = models.CharField(max_length=255, blank=True, default='')
     contract_value = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     start_date = models.DateField(null=True, blank=True)
     completion_date = models.DateField(null=True, blank=True)
@@ -367,6 +406,11 @@ class ContractRevenue(models.Model):
     budget_foh = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     budget_commitments = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     budget_contingencies = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    agreed_variation_total = models.DecimalField(
         max_digits=16,
         decimal_places=2,
         default=0,
@@ -449,6 +493,34 @@ class ContractRevenueVariation(models.Model):
     )
     variation_number = models.CharField(max_length=100)
     amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    material = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    machining = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    coating = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    consumables = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    subcontracts = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    production_labour = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    freight_custom = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    installation_labour = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
+    prelims = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    foh = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    commitments = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    contingencies = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

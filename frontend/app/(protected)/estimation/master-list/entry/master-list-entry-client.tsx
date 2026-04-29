@@ -77,9 +77,6 @@ export default function MasterListEntryClient() {
         <h1 className="text-2xl font-bold text-slate-900">
           Master List Entry
         </h1>
-        <p className="mt-2 text-slate-700">
-          Save reusable estimation items with unit, rate, and optional PO Ref #.
-        </p>
       </div>
 
       <form

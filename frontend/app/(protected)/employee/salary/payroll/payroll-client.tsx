@@ -10,8 +10,11 @@ type EmployeeOption = {
 }
 
 type PayrollResponse = {
+  company_code: 'ARM' | 'AKR'
+  company_display_name: string
   employee_id: string
   employee_name: string
+  category: 'Staff' | 'Labour'
   month: number
   year: number
   calendar_days: number
@@ -58,14 +61,13 @@ const monthOptions = [
 ]
 
 const currentDate = new Date()
-const initialMonth = currentDate.getMonth() + 1
 const initialYear = currentDate.getFullYear()
 
 export default function PayrollClient() {
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([])
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
   const [selectedEmployeeName, setSelectedEmployeeName] = useState('')
-  const [month, setMonth] = useState(String(initialMonth))
+  const [month, setMonth] = useState('')
   const [year, setYear] = useState(String(initialYear))
   const [otherDeduction, setOtherDeduction] = useState('0')
   const [incentive, setIncentive] = useState('0')
@@ -74,6 +76,7 @@ export default function PayrollClient() {
   const [payroll, setPayroll] = useState<PayrollResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [assetOrigin, setAssetOrigin] = useState('')
 
   useEffect(() => {
     async function loadEmployeeOptions() {
@@ -88,6 +91,12 @@ export default function PayrollClient() {
     }
 
     loadEmployeeOptions()
+  }, [])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setAssetOrigin(window.location.origin)
+    }
   }, [])
 
   useEffect(() => {
@@ -178,9 +187,6 @@ export default function PayrollClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Payroll</h1>
-        <p className="mt-2 text-slate-700">
-          Select employee, month, and year to generate salary slip.
-        </p>
       </div>
 
       <form
@@ -192,7 +198,9 @@ export default function PayrollClient() {
             <select
               value={selectedEmployeeId}
               onChange={(e) => handleEmployeeIdChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedEmployeeId ? 'text-black' : 'text-neutral-500'
+              }`}
               required
             >
               <option value="">Select employee ID</option>
@@ -208,7 +216,9 @@ export default function PayrollClient() {
             <select
               value={selectedEmployeeName}
               onChange={(e) => handleEmployeeNameChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedEmployeeName ? 'text-black' : 'text-neutral-500'
+              }`}
               required
             >
               <option value="">Select employee name</option>
@@ -227,9 +237,12 @@ export default function PayrollClient() {
                 setMonth(e.target.value)
                 setPayroll(null)
               }}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                month ? 'text-black' : 'text-neutral-500'
+              }`}
               required
             >
+              <option value="">Select Month</option>
               {monthOptions.map((monthOption) => (
                 <option key={monthOption.value} value={monthOption.value}>
                   {monthOption.label}
@@ -241,6 +254,8 @@ export default function PayrollClient() {
           <Field label="Year">
             <input
               type="number"
+              inputMode="numeric"
+              data-skip-indian-format="true"
               value={year}
               onChange={(e) => {
                 setYear(e.target.value)
@@ -313,116 +328,230 @@ export default function PayrollClient() {
       </form>
 
       {payroll && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-          <h2 className="text-2xl font-bold text-slate-900">
-            Salary Slip - {selectedMonthLabel} {payroll.year}
-          </h2>
-
-          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <p className="text-slate-800">
-              <span className="font-semibold">Employee Name:</span> {payroll.employee_name}
-            </p>
-            <p className="text-slate-800">
-              <span className="font-semibold">Employee ID:</span> {payroll.employee_id}
-            </p>
-          </div>
-
-          <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 p-6">
-              <h3 className="mb-4 text-lg font-semibold text-slate-900">
-                Attendance
-              </h3>
-              <div className="space-y-2 text-slate-800">
-                <p>Calendar days: {payroll.calendar_days}</p>
-                <p>Absent: {payroll.absent_days}</p>
-                <p>Medical leave with doc: {payroll.medical_leave_with_doc_days}</p>
-                <p>Medical leave without doc: {payroll.medical_leave_without_doc_days}</p>
-                <p>Annual Leave: {payroll.annual_leave_days}</p>
-                <p>Total working days: {payroll.total_working_days}</p>
+        <div
+          data-export-scope="true"
+          data-export-kind="payroll-slip"
+          className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
+        >
+          <div
+            className="mx-auto max-w-[860px] overflow-x-auto text-black"
+            style={{ fontFamily: '"Times New Roman", Times, serif' }}
+          >
+            <div className="min-w-[760px] border border-black bg-white">
+              <div className="border-b border-black px-4 py-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={getCompanyLogoSrc(payroll.company_code, assetOrigin)}
+                    alt={
+                      payroll.company_code === 'AKR'
+                        ? 'Al Kanz Al Raq Metal Coating Industrial LLC'
+                        : 'Al Riyada Metal Industrial LLC'
+                    }
+                    className="payroll-logo h-16 w-auto"
+                  />
               </div>
+
+              <table className="payroll-header-table w-full border-collapse text-[15px]">
+                <colgroup>
+                  <col style={{ width: '26%' }} />
+                  <col style={{ width: '24%' }} />
+                  <col style={{ width: '25%' }} />
+                  <col style={{ width: '25%' }} />
+                </colgroup>
+                <tbody>
+                  <tr>
+                    <th
+                      colSpan={4}
+                      className="payroll-title-cell border-b border-black px-3 py-1 text-center text-[20px] font-bold"
+                    >
+                      Salary Slip - {selectedMonthLabel} {payroll.year}
+                    </th>
+                  </tr>
+                  <tr>
+                    <th className="payroll-meta-label border-r border-b border-black px-2 py-1 text-left font-bold">
+                      Employee Name:
+                    </th>
+                    <td className="payroll-meta-value border-r border-b border-black px-2 py-1 text-left font-bold">
+                      {payroll.employee_name}
+                    </td>
+                    <td
+                      colSpan={2}
+                      className="payroll-meta-spacer border-b border-black px-2 py-1"
+                    >
+                      &nbsp;
+                    </td>
+                  </tr>
+                  <tr>
+                    <th className="payroll-meta-label border-r border-b border-black px-2 py-1 text-left font-bold">
+                      Employee ID:
+                    </th>
+                    <td className="payroll-meta-value border-r border-b border-black px-2 py-1 text-left font-bold">
+                      {payroll.employee_id}
+                    </td>
+                    <td
+                      colSpan={2}
+                      className="payroll-meta-spacer border-b border-black px-2 py-1"
+                    >
+                      &nbsp;
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <table className="payroll-attendance-table w-full border-collapse text-[15px]">
+                <tbody>
+                  <tr>
+                    <th
+                      colSpan={2}
+                      className="payroll-section-heading border-r border-b border-black px-2 py-1 text-center text-[18px] font-bold"
+                    >
+                      Attendance
+                    </th>
+                    <th
+                      colSpan={2}
+                      className="payroll-section-heading border-b border-black px-2 py-1 text-center text-[18px] font-bold"
+                    >
+                      Overtime Details
+                    </th>
+                  </tr>
+                  <AttendanceRow
+                    leftLabel="Calendar days:"
+                    leftValue={String(payroll.calendar_days)}
+                    rightLabel="Normal OT hours:"
+                    rightValue={formatHours(payroll.normal_ot_hours)}
+                  />
+                  <AttendanceRow
+                    leftLabel="Absent:"
+                    leftValue={String(payroll.absent_days)}
+                    rightLabel="Sunday OT hours:"
+                    rightValue={formatHours(payroll.sunday_ot_hours)}
+                  />
+                  <AttendanceRow
+                    leftLabel="Medical leave with doc:"
+                    leftValue={String(payroll.medical_leave_with_doc_days)}
+                    rightLabel="Public Holiday OT hours:"
+                    rightValue={formatHours(payroll.public_holiday_ot_hours)}
+                  />
+                  <AttendanceRow
+                    leftLabel="Medical leave without doc:"
+                    leftValue={String(payroll.medical_leave_without_doc_days)}
+                    rightLabel=""
+                    rightValue=""
+                  />
+                  <AttendanceRow
+                    leftLabel="Annual Leave:"
+                    leftValue={String(payroll.annual_leave_days)}
+                    rightLabel=""
+                    rightValue=""
+                  />
+                  <AttendanceRow
+                    leftLabel="Total working days:"
+                    leftValue={String(payroll.total_working_days)}
+                    rightLabel=""
+                    rightValue=""
+                    isLast
+                  />
+                </tbody>
+              </table>
+
+              <table className="payroll-salary-table w-full border-collapse text-[15px]">
+                <thead>
+                  <tr>
+                    <th className="payroll-column-heading border-r border-b border-black px-2 py-1 text-center font-bold">
+                      Salary Description
+                    </th>
+                    <th className="payroll-column-heading border-r border-b border-black px-2 py-1 text-center font-bold">
+                      Monthly Salary
+                    </th>
+                    <th className="payroll-column-heading border-r border-b border-black px-2 py-1 text-center font-bold">
+                      Earned Salary
+                    </th>
+                    <th className="payroll-column-heading border-r border-b border-black px-2 py-1 text-center font-bold">
+                      Deductions
+                    </th>
+                    <th className="payroll-column-heading border-b border-black px-2 py-1 text-center font-bold">
+                      Amount
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <SalaryRow
+                    description="Basic Salary"
+                    monthly={formatMoney(payroll.basic_salary_monthly)}
+                    earned={formatMoney(payroll.basic_salary_earned)}
+                    deductionLabel="Advance Deduction:"
+                    deductionAmount={formatMoney(payroll.advance_deduction)}
+                  />
+                  <SalaryRow
+                    description="Other Allowances"
+                    monthly={formatMoney(payroll.other_allowances_monthly)}
+                    earned={formatMoney(payroll.other_allowances_earned)}
+                    deductionLabel="Other Deduction:"
+                    deductionAmount={formatMoney(payroll.other_deduction)}
+                  />
+                  <SalaryRow
+                    description="Normal OT"
+                    monthly=""
+                    earned={formatMoney(payroll.normal_ot_amount)}
+                    deductionLabel=""
+                    deductionAmount=""
+                  />
+                  <SalaryRow
+                    description="Sunday OT"
+                    monthly=""
+                    earned={formatMoney(payroll.sunday_ot_amount)}
+                    deductionLabel=""
+                    deductionAmount=""
+                  />
+                  <SalaryRow
+                    description="Public Holiday OT"
+                    monthly=""
+                    earned={formatMoney(payroll.public_holiday_ot_amount)}
+                    deductionLabel=""
+                    deductionAmount=""
+                  />
+                  <SalaryRow
+                    description="Incentive"
+                    monthly=""
+                    earned={formatMoney(payroll.incentive)}
+                    deductionLabel=""
+                    deductionAmount=""
+                  />
+                  <SalaryRow
+                    description="Total"
+                    monthly=""
+                    earned={formatMoney(payroll.total_earned)}
+                    deductionLabel="Total Deductions:"
+                    deductionAmount={formatMoney(payroll.total_deductions)}
+                    bold
+                    isLast
+                  />
+                </tbody>
+              </table>
+
+              <table className="w-full border-collapse text-[17px]">
+                <tbody>
+                  <tr>
+                    <th className="payroll-netpay border-b border-black px-2 py-2 text-center text-[18px] font-bold">
+                      Net Pay: {formatMoney(payroll.net_pay)}
+                    </th>
+                  </tr>
+                </tbody>
+              </table>
+
+              <table className="payroll-signature-table w-full border-collapse text-[16px]">
+                <tbody>
+                  <tr>
+                    <th className="payroll-signature-cell w-1/2 px-4 py-16 text-left align-top font-bold">
+                      Employee Signature:
+                    </th>
+                    <th className="payroll-signature-cell px-4 py-16 text-left align-top font-bold">
+                      Authorized Signature:
+                    </th>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-
-            <div className="rounded-xl border border-slate-200 p-6">
-              <h3 className="mb-4 text-lg font-semibold text-slate-900">
-                Overtime Details
-              </h3>
-              <div className="space-y-2 text-slate-800">
-                <p>Normal OT hours: {payroll.normal_ot_hours}</p>
-                <p>Sunday OT hours: {payroll.sunday_ot_hours}</p>
-                <p>Public Holiday OT hours: {payroll.public_holiday_ot_hours}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-8 max-h-[70vh] w-full max-w-full overflow-auto">
-            <table className="min-w-[780px] border-collapse">
-              <thead className="sticky top-0 z-10 bg-white">
-                <tr className="border-b border-slate-300 text-left text-slate-900">
-                  <th className="py-3 pr-4 font-semibold">Salary Description</th>
-                  <th className="py-3 pr-4 font-semibold">Monthly Salary</th>
-                  <th className="py-3 pr-4 font-semibold">Earned Salary</th>
-                  <th className="py-3 pr-4 font-semibold">Deductions</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                <tr className="border-b border-slate-100">
-                  <td className="py-3 pr-4 text-slate-800">Basic Salary</td>
-                  <td className="py-3 pr-4 text-slate-800">{formatMoney(payroll.basic_salary_monthly)}</td>
-                  <td className="py-3 pr-4 text-slate-800">{formatMoney(payroll.basic_salary_earned)}</td>
-                  <td className="py-3 pr-4 text-slate-800">Advance Deduction: {formatMoney(payroll.advance_deduction)}
-                  </td>
-                </tr>
-
-                <tr className="border-b border-slate-100">
-                  <td className="py-3 pr-4 text-slate-800">Other Allowances</td>
-                  <td className="py-3 pr-4 text-slate-800">{formatMoney(payroll.other_allowances_monthly)}</td>
-                  <td className="py-3 pr-4 text-slate-800">{formatMoney(payroll.other_allowances_earned)}</td>
-                  <td className="py-3 pr-4 text-slate-800">Other Deduction: {formatMoney(payroll.other_deduction)}</td>
-                </tr>
-
-                <tr className="border-b border-slate-100">
-                  <td className="py-3 pr-4 text-slate-800">Normal OT</td>
-                  <td className="py-3 pr-4 text-slate-800">-</td>
-                  <td className="py-3 pr-4 text-slate-800">{formatMoney(payroll.normal_ot_amount)}</td>
-                  <td className="py-3 pr-4 text-slate-800">-</td>
-                </tr>
-
-                <tr className="border-b border-slate-100">
-                  <td className="py-3 pr-4 text-slate-800">Sunday OT</td>
-                  <td className="py-3 pr-4 text-slate-800">-</td>
-                  <td className="py-3 pr-4 text-slate-800">{formatMoney(payroll.sunday_ot_amount)}</td>
-                  <td className="py-3 pr-4 text-slate-800">-</td>
-                </tr>
-
-                <tr className="border-b border-slate-100">
-                  <td className="py-3 pr-4 text-slate-800">Public Holiday OT</td>
-                  <td className="py-3 pr-4 text-slate-800">-</td>
-                  <td className="py-3 pr-4 text-slate-800">{formatMoney(payroll.public_holiday_ot_amount)}</td>
-                  <td className="py-3 pr-4 text-slate-800">-</td>
-                </tr>
-
-                <tr className="border-b border-slate-100">
-                  <td className="py-3 pr-4 text-slate-800">Incentive</td>
-                  <td className="py-3 pr-4 text-slate-800">-</td>
-                  <td className="py-3 pr-4 text-slate-800">{formatMoney(payroll.incentive)}</td>
-                  <td className="py-3 pr-4 text-slate-800">-</td>
-                </tr>
-
-                <tr className="border-b border-slate-200 font-semibold">
-                  <td className="py-3 pr-4 text-slate-900">Total</td>
-                  <td className="py-3 pr-4 text-slate-900">-</td>
-                  <td className="py-3 pr-4 text-slate-900">{formatMoney(payroll.total_earned)}</td>
-                  <td className="py-3 pr-4 text-slate-900">{formatMoney(payroll.total_deductions)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-8 rounded-xl bg-slate-900 px-6 py-4 text-white">
-            <p className="text-lg font-semibold">
-              Net Pay: {formatMoney(payroll.net_pay)}
-            </p>
           </div>
         </div>
       )}
@@ -452,4 +581,85 @@ function formatMoney(value: string) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
+}
+
+function getCompanyLogoSrc(companyCode: 'ARM' | 'AKR', origin: string) {
+  const base = origin || ''
+
+  return companyCode === 'AKR'
+    ? `${base}/akr-logo.png`
+    : `${base}/al-riyada-logo.jpeg`
+}
+
+function formatHours(value: string) {
+  return Number(value).toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+}
+
+function AttendanceRow({
+  leftLabel,
+  leftValue,
+  rightLabel,
+  rightValue,
+  isLast = false,
+}: {
+  leftLabel: string
+  leftValue: string
+  rightLabel: string
+  rightValue: string
+  isLast?: boolean
+}) {
+  const cellClass = isLast ? 'px-2 py-1' : 'border-b border-black px-2 py-1'
+  const splitClass = isLast
+    ? 'border-r border-black px-2 py-1'
+    : 'border-r border-b border-black px-2 py-1'
+
+  return (
+    <tr>
+      <td className={splitClass}>{leftLabel}</td>
+      <td className={`${splitClass} text-right`}>{leftValue}</td>
+      <td className={cellClass}>{rightLabel || '\u00A0'}</td>
+      <td className={`${cellClass} text-right`}>{rightValue || '\u00A0'}</td>
+    </tr>
+  )
+}
+
+function SalaryRow({
+  description,
+  monthly,
+  earned,
+  deductionLabel,
+  deductionAmount,
+  bold = false,
+  isLast = false,
+}: {
+  description: string
+  monthly: string
+  earned: string
+  deductionLabel: string
+  deductionAmount: string
+  bold?: boolean
+  isLast?: boolean
+}) {
+  const rowClass = `${isLast ? '' : 'border-b border-black '} ${
+    bold ? 'font-bold' : ''
+  }`
+
+  return (
+    <tr className={rowClass}>
+      <td className="border-r border-black px-2 py-1">{description}</td>
+      <td className="border-r border-black px-2 py-1 text-right">
+        {monthly || '\u00A0'}
+      </td>
+      <td className="border-r border-black px-2 py-1 text-right">
+        {earned || '\u00A0'}
+      </td>
+      <td className="border-r border-black px-2 py-1">
+        {deductionLabel || '\u00A0'}
+      </td>
+      <td className="px-2 py-1 text-right">{deductionAmount || '\u00A0'}</td>
+    </tr>
+  )
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 import {
   formatIndianQuantity,
   toNumber,
@@ -79,9 +80,6 @@ export default function InventoryIssuanceLogClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Issuance Log</h1>
-        <p className="mt-2 text-slate-700">
-          Review all inventory issuance entries sorted date-wise.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -185,18 +183,5 @@ function BodyCell({
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) {
-    return '-'
-  }
-
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(date)
+  return formatDateDdMmmYy(value)
 }

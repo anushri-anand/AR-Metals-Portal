@@ -5,7 +5,6 @@ export default function ProductionPage() {
     <SectionLinksPage
       title="Production"
       links={[
-        { label: 'Project Details', href: '/production/project-details' },
         { label: 'Time Allocation', href: '/production/time-allocation' },
         { label: 'Status', href: '/production/status' },
       ]}

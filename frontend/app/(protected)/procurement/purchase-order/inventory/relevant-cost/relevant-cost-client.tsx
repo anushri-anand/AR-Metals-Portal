@@ -312,9 +312,6 @@ export default function InventoryRelevantCostClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Update Relevant Cost</h1>
-        <p className="mt-2 text-slate-700">
-          Allocate inventory issued amount into the selected relevant project PO items.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -331,7 +328,9 @@ export default function InventoryRelevantCostClient() {
                 setSelectedInventoryPoNumber(nextPoNumber)
                 setSelectedSupplierName(selectedPurchaseOrder?.supplier_name || '')
               }}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedInventoryPoNumber ? 'text-black' : 'text-neutral-400'
+              }`}
               disabled={loading}
             >
               <option value="">{loading ? 'Loading inventory PO #' : 'Select inventory PO #'}</option>
@@ -350,7 +349,9 @@ export default function InventoryRelevantCostClient() {
                 setSelectedSupplierName(event.target.value)
                 setSelectedInventoryPoNumber('')
               }}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedSupplierName ? 'text-black' : 'text-neutral-400'
+              }`}
               disabled={loading}
             >
               <option value="">{loading ? 'Loading suppliers...' : 'Select supplier'}</option>
@@ -366,7 +367,9 @@ export default function InventoryRelevantCostClient() {
             <select
               value={selectedRelevantPoNumber}
               onChange={(event) => setSelectedRelevantPoNumber(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedRelevantPoNumber ? 'text-black' : 'text-neutral-400'
+              }`}
               disabled={!selectedInventoryPo}
             >
               <option value="">
@@ -384,7 +387,9 @@ export default function InventoryRelevantCostClient() {
             <select
               value={selectedInventoryKey}
               onChange={(event) => setSelectedInventoryKey(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                selectedInventoryKey ? 'text-black' : 'text-neutral-400'
+              }`}
               disabled={!selectedRelevantPo}
             >
               <option value="">
@@ -412,9 +417,6 @@ export default function InventoryRelevantCostClient() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900">Relevant PO Items</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Displaying all items in the selected relevant PO.
-          </p>
         </div>
 
         <div className="max-h-[70vh] overflow-auto">

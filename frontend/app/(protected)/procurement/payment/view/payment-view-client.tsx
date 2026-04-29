@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 
 type DeliveryItem = {
   id: number
@@ -80,9 +81,6 @@ export default function PaymentViewClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Payment View</h1>
-        <p className="mt-2 text-slate-700">
-          Select a PO # to review the full saved payment entry.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -91,7 +89,9 @@ export default function PaymentViewClient() {
           <select
             value={selectedPoNumber}
             onChange={(e) => setSelectedPoNumber(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+            className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+              selectedPoNumber ? 'text-black' : 'text-neutral-400'
+            }`}
             disabled={loading}
           >
             <option value="">
@@ -308,8 +308,7 @@ function BodyCell({
 }
 
 function formatDate(value: string | null) {
-  if (!value) return '-'
-  return new Date(`${value}T00:00:00`).toLocaleDateString('en-GB')
+  return formatDateDdMmmYy(value)
 }
 
 function formatMoney(value: number) {

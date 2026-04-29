@@ -1,15 +1,13 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+from .roles import ROLE_ACCOUNTANT, ROLE_CHOICES
+
 
 class User(AbstractUser):
-    ROLE_CHOICES = (
-        ('user_1', 'User 1'),
-        ('user_2', 'User 2'),
-        ('admin', 'Admin'),
-    )
+    ROLE_CHOICES = ROLE_CHOICES
 
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='user_1')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_ACCOUNTANT)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

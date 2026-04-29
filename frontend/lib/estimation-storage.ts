@@ -1,4 +1,5 @@
 import { fetchAPI } from '@/lib/api'
+import { normalizeVariationNumber } from '@/lib/variation-number'
 
 export type MasterListItem = {
   id: string | number
@@ -11,14 +12,24 @@ export type MasterListItem = {
 export type ClientData = {
   id: string | number
   clientName: string
+  customerId: string
   supplierTrnNo: string
+  poBox: string
   country: string
   city: string
   contactPerson: string
   mobileNumber: string
   companyTelNumber: string
   email: string
+  contacts: ClientContact[]
   remarks: string
+}
+
+export type ClientContact = {
+  id?: string | number
+  name: string
+  mobileNumber: string
+  email: string
 }
 
 export type TenderLog = {
@@ -26,6 +37,7 @@ export type TenderLog = {
   tenderNumber: string
   quoteRef: string
   clientId?: string | number | null
+  contactId?: string | number | null
   clientName: string
   contactName: string
   projectName: string
@@ -48,6 +60,7 @@ export type TenderLogInput = {
   revisionNumber: string
   revisionDate: string | null
   clientId?: string | number | null
+  contactId?: string | number | null
   projectName: string
   projectLocation: string
   geography: GeographyType
@@ -75,12 +88,25 @@ export type ContractRevenueVariation = {
   id?: string | number
   variationNumber: string
   amount: number
+  material: number
+  machining: number
+  coating: number
+  consumables: number
+  subcontracts: number
+  productionLabour: number
+  freightCustom: number
+  installationLabour: number
+  prelims: number
+  foh: number
+  commitments: number
+  contingencies: number
 }
 
 export type ContractRevenue = {
   id: string | number
   projectNumber: string
   projectName: string
+  contractRef: string
   contractValue: number
   startDate: string | null
   completionDate: string | null
@@ -96,6 +122,7 @@ export type ContractRevenue = {
   budgetFoh: number
   budgetCommitments: number
   budgetContingencies: number
+  agreedVariationTotal: number
   variationBudgetMaterial: number
   variationBudgetMachining: number
   variationBudgetCoating: number
@@ -174,6 +201,7 @@ export type CostingRevisionSnapshot = {
   tenderNumber: string
   projectName: string
   revisionNumber: string
+  variationNumber?: string
   status: 'submitted' | 'approved'
   submittedBy: string
   approvedBy: string
@@ -187,6 +215,7 @@ export type BoqItem = {
   tenderNumber: string
   revisionNumber: string
   revisionDate: string | null
+  variationNumber: string
   clientsBoq: string
   package: string
   description: string
@@ -198,11 +227,13 @@ export type BoqItem = {
   commitmentsPercent: number
   contingenciesPercent: number
   markup: number
+  remarks: string
 }
 
 export type EstimateItem = {
   itemId: string | number
   quantity: number
+  rate?: number | null
 }
 
 export type EstimateItemWithWastage = EstimateItem & {
@@ -236,6 +267,7 @@ export type TenderCosting = {
   id: string | number
   boqItemId: string | number
   tenderNumber: string
+  proRataFactor?: number
   material: EstimateItemWithWastage[]
   productionLabour: LabourDetails
   machining: EstimateItem[]
@@ -250,16 +282,31 @@ export function createId(prefix: string) {
 }
 
 export async function getClientData(): Promise<ClientData[]> {
-  return fetchAPI('/estimation/client-data/')
+  const clients = await fetchAPI('/estimation/client-data/')
+  return clients.map(normalizeClientData)
 }
 
 export async function createClientData(
   item: Omit<ClientData, 'id'>
 ): Promise<ClientData> {
-  return fetchAPI('/estimation/client-data/', {
-    method: 'POST',
-    body: JSON.stringify(item),
-  })
+  return normalizeClientData(
+    await fetchAPI('/estimation/client-data/', {
+      method: 'POST',
+      body: JSON.stringify(item),
+    })
+  )
+}
+
+export async function updateClientData(
+  id: string | number,
+  item: Partial<Omit<ClientData, 'id'>>
+): Promise<ClientData> {
+  return normalizeClientData(
+    await fetchAPI(`/estimation/client-data/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(item),
+    })
+  )
 }
 
 export async function getTenderLogs(): Promise<TenderLog[]> {
@@ -340,6 +387,7 @@ export async function submitCostingRevisionSnapshot(input: {
   tenderNumber: string
   projectName: string
   revisionNumber: string
+  variationNumber?: string
 }): Promise<CostingRevisionSnapshot> {
   return normalizeCostingRevisionSnapshot(
     await fetchAPI('/estimation/costing-snapshots/', {
@@ -348,6 +396,7 @@ export async function submitCostingRevisionSnapshot(input: {
         tender_number: input.tenderNumber,
         project_name: input.projectName,
         revision_number: input.revisionNumber,
+        variation_number: input.variationNumber || '',
       }),
     })
   )
@@ -469,6 +518,7 @@ export function createEmptyEstimateItem(): EstimateItem {
   return {
     itemId: '',
     quantity: 0,
+    rate: null,
   }
 }
 
@@ -477,6 +527,7 @@ export function createEmptyEstimateItemWithWastage(): EstimateItemWithWastage {
     itemId: '',
     quantity: 0,
     wastagePercent: 0,
+    rate: null,
   }
 }
 
@@ -504,6 +555,7 @@ export function createEmptyTenderCosting(
     id: createId('costing'),
     boqItemId,
     tenderNumber,
+    proRataFactor: 1,
     material: [createEmptyEstimateItemWithWastage()],
     productionLabour: createEmptyLabourDetails(),
     machining: [createEmptyEstimateItem()],
@@ -525,9 +577,7 @@ export function getEstimateItemAmount(
   value: EstimateItem,
   masterItems: MasterListItem[]
 ) {
-  const item = getMasterItem(masterItems, value.itemId)
-
-  return toNumber(value.quantity) * toNumber(item?.rate)
+  return toNumber(value.quantity) * getEstimateItemRate(value, masterItems)
 }
 
 export function getEstimateItemWithWastageQuantity(
@@ -542,9 +592,10 @@ export function getEstimateItemWithWastageAmount(
   value: EstimateItemWithWastage,
   masterItems: MasterListItem[]
 ) {
-  const item = getMasterItem(masterItems, value.itemId)
-
-  return getEstimateItemWithWastageQuantity(value) * toNumber(item?.rate)
+  return (
+    getEstimateItemWithWastageQuantity(value) *
+    getEstimateItemRate(value, masterItems)
+  )
 }
 
 export function getEstimateItemsAmount(
@@ -622,28 +673,27 @@ export function calculateCostSummary({
   markup: number
   masterItems: MasterListItem[]
 }) {
-  const materialUnitCost = getEstimateItemsWithWastageAmount(
-    costing.material,
-    masterItems
-  )
-  const productionLabourUnitCost = getProductionLabourUnitCost(
-    costing.productionLabour,
-    masterItems
-  )
-  const machiningUnitCost = getEstimateItemsAmount(costing.machining, masterItems)
-  const coatingUnitCost = getEstimateItemsAmount(costing.coating, masterItems)
-  const consumableUnitCost = getEstimateItemsWithWastageAmount(
-    costing.consumable,
-    masterItems
-  )
-  const subcontractUnitCost = getEstimateItemsAmount(
-    costing.subcontract,
-    masterItems
-  )
-  const installationLabourUnitCost = getInstallationLabourUnitCost(
-    costing.installationLabour,
-    masterItems
-  )
+  const proRataFactor = getProRataFactor(costing.proRataFactor)
+  const materialUnitCost =
+    getEstimateItemsWithWastageAmount(
+      costing.material,
+      masterItems
+    ) * proRataFactor
+  const productionLabourUnitCost =
+    getProductionLabourUnitCost(costing.productionLabour, masterItems) *
+    proRataFactor
+  const machiningUnitCost =
+    getEstimateItemsAmount(costing.machining, masterItems) * proRataFactor
+  const coatingUnitCost =
+    getEstimateItemsAmount(costing.coating, masterItems) * proRataFactor
+  const consumableUnitCost =
+    getEstimateItemsWithWastageAmount(costing.consumable, masterItems) *
+    proRataFactor
+  const subcontractUnitCost =
+    getEstimateItemsAmount(costing.subcontract, masterItems) * proRataFactor
+  const installationLabourUnitCost =
+    getInstallationLabourUnitCost(costing.installationLabour, masterItems) *
+    proRataFactor
   const supplyUnitCost =
     materialUnitCost +
     productionLabourUnitCost +
@@ -731,6 +781,7 @@ function normalizeTenderLog(item: TenderLog): TenderLog {
   return {
     ...item,
     quoteRef: item.quoteRef || '',
+    contactId: item.contactId ?? null,
     contactName: item.contactName || '',
     projectLocation: item.projectLocation || '',
     geography: (item.geography as GeographyType) || geographyOptions[0],
@@ -743,9 +794,34 @@ function normalizeTenderLog(item: TenderLog): TenderLog {
   }
 }
 
+function normalizeClientData(item: ClientData): ClientData {
+  return {
+    ...item,
+    customerId: item.customerId || '',
+    supplierTrnNo: item.supplierTrnNo || '',
+    poBox: item.poBox || '',
+    country: item.country || '',
+    city: item.city || '',
+    companyTelNumber: item.companyTelNumber || '',
+    remarks: item.remarks || '',
+    contactPerson: item.contactPerson || '',
+    mobileNumber: item.mobileNumber || '',
+    email: item.email || '',
+    contacts: Array.isArray(item.contacts)
+      ? item.contacts.map((contact) => ({
+          id: contact.id,
+          name: contact.name || '',
+          mobileNumber: contact.mobileNumber || '',
+          email: contact.email || '',
+        }))
+      : [],
+  }
+}
+
 function normalizeBoqItem(item: BoqItem): BoqItem {
   return {
     ...item,
+    variationNumber: normalizeVariationNumber(item.variationNumber),
     package: item.package || '',
     revisionNumber: item.revisionNumber || '',
     revisionDate: item.revisionDate || null,
@@ -756,6 +832,7 @@ function normalizeBoqItem(item: BoqItem): BoqItem {
     commitmentsPercent: toNumber(item.commitmentsPercent),
     contingenciesPercent: toNumber(item.contingenciesPercent),
     markup: toNumber(item.markup),
+    remarks: item.remarks || '',
   }
 }
 
@@ -767,6 +844,9 @@ function normalizeCostingRevisionSnapshot(
     tenderNumber: String(item.tender_number || item.tenderNumber || ''),
     projectName: String(item.project_name || item.projectName || ''),
     revisionNumber: String(item.revision_number || item.revisionNumber || ''),
+    variationNumber: normalizeVariationNumber(
+      String(item.variation_number || item.variationNumber || '')
+    ),
     status:
       String(item.status || 'submitted') === 'approved' ? 'approved' : 'submitted',
     submittedBy: String(item.submitted_by || item.submittedBy || ''),
@@ -782,6 +862,10 @@ function normalizeCostingRevisionSnapshot(
 function normalizeTenderCosting(item: TenderCosting): TenderCosting {
   return {
     ...item,
+    proRataFactor:
+      item.proRataFactor === undefined || item.proRataFactor === null
+        ? 1
+        : toNumber(item.proRataFactor),
     material: normalizeEstimateItemsWithWastage(item.material),
     productionLabour: normalizeProductionLabour(item.productionLabour),
     machining: normalizeEstimateItems(item.machining),
@@ -795,6 +879,7 @@ function normalizeTenderCosting(item: TenderCosting): TenderCosting {
 function normalizeContractRevenue(item: ContractRevenue): ContractRevenue {
   return {
     ...item,
+    contractRef: item.contractRef || '',
     contractValue: toNumber(item.contractValue),
     startDate: item.startDate || null,
     completionDate: item.completionDate || null,
@@ -810,6 +895,7 @@ function normalizeContractRevenue(item: ContractRevenue): ContractRevenue {
     budgetFoh: toNumber(item.budgetFoh),
     budgetCommitments: toNumber(item.budgetCommitments),
     budgetContingencies: toNumber(item.budgetContingencies),
+    agreedVariationTotal: toNumber(item.agreedVariationTotal),
     variationBudgetMaterial: toNumber(item.variationBudgetMaterial),
     variationBudgetMachining: toNumber(item.variationBudgetMachining),
     variationBudgetCoating: toNumber(item.variationBudgetCoating),
@@ -827,6 +913,18 @@ function normalizeContractRevenue(item: ContractRevenue): ContractRevenue {
     variations: (item.variations || []).map((variation) => ({
       ...variation,
       amount: toNumber(variation.amount),
+      material: toNumber(variation.material),
+      machining: toNumber(variation.machining),
+      coating: toNumber(variation.coating),
+      consumables: toNumber(variation.consumables),
+      subcontracts: toNumber(variation.subcontracts),
+      productionLabour: toNumber(variation.productionLabour),
+      freightCustom: toNumber(variation.freightCustom),
+      installationLabour: toNumber(variation.installationLabour),
+      prelims: toNumber(variation.prelims),
+      foh: toNumber(variation.foh),
+      commitments: toNumber(variation.commitments),
+      contingencies: toNumber(variation.contingencies),
     })),
   }
 }
@@ -836,7 +934,7 @@ function normalizeContractVariationLog(
 ): ContractVariationLog {
   return {
     ...item,
-    rfvNumber: item.rfvNumber || '',
+    rfvNumber: normalizeVariationNumber(item.rfvNumber),
     clientVariationNumber: item.clientVariationNumber || '',
     description: item.description || '',
     documentRef: item.documentRef || '',
@@ -888,6 +986,10 @@ function normalizeEstimateItems(
   const normalizedItems = items.map((item) => ({
     itemId: item?.itemId || '',
     quantity: toNumber(item?.quantity),
+    rate:
+      item?.rate === null || item?.rate === undefined
+        ? null
+        : toNumber(item?.rate),
   }))
 
   return normalizedItems.length > 0 ? normalizedItems : [createEmptyEstimateItem()]
@@ -901,6 +1003,10 @@ function normalizeEstimateItemsWithWastage(
     itemId: item?.itemId || '',
     quantity: toNumber(item?.quantity),
     wastagePercent: toNumber(item?.wastagePercent),
+    rate:
+      item?.rate === null || item?.rate === undefined
+        ? null
+        : toNumber(item?.rate),
   }))
 
   return normalizedItems.length > 0
@@ -928,6 +1034,29 @@ function normalizeLabourHours(
     semiSkilledHours: toNumber(value?.semiSkilledHours),
     helperHours: toNumber(value?.helperHours),
   }
+}
+
+export function getEstimateItemRate(
+  value: EstimateItem | EstimateItemWithWastage,
+  masterItems: MasterListItem[]
+) {
+  if (value.rate !== null && value.rate !== undefined) {
+    return toNumber(value.rate)
+  }
+
+  const item = getMasterItem(masterItems, value.itemId)
+
+  return toNumber(item?.rate)
+}
+
+function getProRataFactor(value: unknown) {
+  if (value === '' || value === null || value === undefined) {
+    return 1
+  }
+
+  const factor = Number(value)
+
+  return Number.isFinite(factor) ? factor : 1
 }
 
 function getLabourRate(

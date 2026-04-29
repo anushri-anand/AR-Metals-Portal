@@ -1,4 +1,5 @@
 import { getStoredCompany } from '@/lib/company'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 
 type PurchaseOrderPreviewItem = {
   item: string
@@ -89,7 +90,7 @@ function buildPurchaseOrderPreviewHtml(
   origin: string
 ) {
   const selectedCompany = companyDetails[company]
-  const logoUrl = company === 'ARM' ? `${origin}/al-riyada-logo.jpeg` : ''
+  const logoUrl = getCompanyLogoUrl(company, origin)
   const logoMarkup = getCompanyLogoMarkup(company, origin)
   const items = normalizeItems(data)
   const currencyLabel =
@@ -521,7 +522,7 @@ function buildPurchaseOrderPreviewHtml(
             const pageWidth = 595;
             const pageHeight = 842;
             const content = [];
-            const logoBytes = data.logoUrl ? await loadBytes(data.logoUrl) : null;
+            const logoImage = data.logoUrl ? await loadLogoAsset(data.logoUrl) : null;
 
             function pdfY(top, height = 0) {
               return pageHeight - top - height;
@@ -604,8 +605,21 @@ function buildPurchaseOrderPreviewHtml(
             rect(18, 18, 559, 122);
             line(397, 18, 397, 140);
 
-            if (logoBytes) {
-              content.push('q 250 0 0 59 28 ' + pdfY(26, 59) + ' cm /Logo Do Q');
+            if (logoImage) {
+              const logoPlacement = fitWithinBox(logoImage.width, logoImage.height, 285, 82);
+              const logoX = 28;
+              const logoY = 26 + (82 - logoPlacement.height) / 2;
+              content.push(
+                'q ' +
+                  logoPlacement.width.toFixed(2) +
+                  ' 0 0 ' +
+                  logoPlacement.height.toFixed(2) +
+                  ' ' +
+                  logoX.toFixed(2) +
+                  ' ' +
+                  pdfY(logoY, logoPlacement.height).toFixed(2) +
+                  ' cm /Logo Do Q'
+              );
             } else {
               text(data.companyTitle, 30, 32, 22, { maxWidth: 340 });
             }
@@ -740,31 +754,86 @@ function buildPurchaseOrderPreviewHtml(
             text('General Manager', 560, 784, 10, { align: 'right' });
 
             const contentStream = content.join('\\n');
-            return createPdfDocument(contentStream, logoBytes);
+            return createPdfDocument(contentStream, logoImage);
           }
 
-          async function loadBytes(url) {
-            let response;
+          async function loadLogoAsset(url) {
+            let image;
 
             try {
-              response = await fetch(url);
+              image = await loadImage(url);
             } catch {
               return null;
             }
 
-            if (!response.ok) {
+            const width = image.naturalWidth || image.width;
+            const height = image.naturalHeight || image.height;
+
+            if (!width || !height) {
               return null;
             }
 
-            return new Uint8Array(await response.arrayBuffer());
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+
+            if (!context) {
+              return null;
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            context.fillStyle = '#ffffff';
+            context.fillRect(0, 0, width, height);
+            context.drawImage(image, 0, 0, width, height);
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+            const base64 = dataUrl.split(',')[1];
+
+            if (!base64) {
+              return null;
+            }
+
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+
+            for (let index = 0; index < binary.length; index += 1) {
+              bytes[index] = binary.charCodeAt(index);
+            }
+
+            return { bytes, width, height };
           }
 
-          function createPdfDocument(contentStream, logoBytes) {
+          async function loadImage(url) {
+            return await new Promise(function (resolve, reject) {
+              const image = new Image();
+
+              image.onload = function () {
+                resolve(image);
+              };
+
+              image.onerror = function () {
+                reject(new Error('Could not load image.'));
+              };
+
+              image.src = url;
+            });
+          }
+
+          function fitWithinBox(width, height, maxWidth, maxHeight) {
+            const scale = Math.min(maxWidth / width, maxHeight / height);
+
+            return {
+              width: width * scale,
+              height: height * scale,
+            };
+          }
+
+          function createPdfDocument(contentStream, logoImage) {
             const encoder = new TextEncoder();
             const chunks = [];
             const offsets = [];
             let length = 0;
-            const hasLogo = Boolean(logoBytes);
+            const hasLogo = Boolean(logoImage);
             const contentObjectId = hasLogo ? 6 : 5;
 
             function pushBytes(bytes) {
@@ -802,10 +871,10 @@ function buildPurchaseOrderPreviewHtml(
 
             if (hasLogo) {
               addObject(5, [
-                '<< /Type /XObject /Subtype /Image /Width 448 /Height 106 ',
+                '<< /Type /XObject /Subtype /Image /Width ' + Math.round(logoImage.width) + ' /Height ' + Math.round(logoImage.height) + ' ',
                 '/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode ',
-                '/Length ' + logoBytes.length + ' >>\\nstream\\n',
-                logoBytes,
+                '/Length ' + logoImage.bytes.length + ' >>\\nstream\\n',
+                logoImage.bytes,
                 '\\nendstream',
               ]);
             }
@@ -951,31 +1020,31 @@ function buildPurchaseOrderPreviewHtml(
 }
 
 function getCompanyLogoMarkup(company: 'ARM' | 'AKR', origin: string) {
-  if (company === 'ARM') {
+  if (company === 'ARM' || company === 'AKR') {
+    const companyLogoUrl = getCompanyLogoUrl(company, origin)
+    const altText =
+      company === 'AKR'
+        ? 'Al Kanz Al Raq Metal Coating Industrial LLC'
+        : 'Al Riyada Metal Industrial LLC'
+
     return `
       <div class="logo">
         <img
           class="logo-img"
-          src="${escapeHtml(`${origin}/al-riyada-logo.jpeg`)}"
-          alt="Al Riyada Metal Industrial LLC"
+          src="${escapeHtml(companyLogoUrl)}"
+          alt="${escapeHtml(altText)}"
         />
       </div>
     `
   }
 
-  if (company === 'AKR') {
-    return `
-      <div class="logo" aria-label="AKR Metal Industrial LLC">
-        <div class="logo-main">
-          <span class="logo-blue">AKR</span>
-          <span class="logo-gray">METAL</span>
-        </div>
-        <div class="logo-sub">METAL INDUSTRIAL LLC</div>
-      </div>
-    `
-  }
-
   return ''
+}
+
+function getCompanyLogoUrl(company: 'ARM' | 'AKR', origin: string) {
+  return company === 'AKR'
+    ? `${origin}/akr-logo.png`
+    : `${origin}/al-riyada-logo.jpeg`
 }
 
 function jsonForScript(value: unknown) {
@@ -1050,17 +1119,7 @@ function getPdfFilename(poNumber: string) {
 }
 
 function formatDateDisplay(value: string) {
-  if (!value) return '-'
-
-  const date = new Date(`${value}T00:00:00`)
-
-  if (Number.isNaN(date.getTime())) return value
-
-  return date.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: '2-digit',
-  })
+  return formatDateDdMmmYy(value)
 }
 
 function escapeHtml(value: string) {

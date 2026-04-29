@@ -3,7 +3,16 @@
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { fetchAPI } from '@/lib/api'
-import { getStoredCompany, isCompanyScopedPath } from '@/lib/company'
+import { canAccessPath, getDefaultPathForRole } from '@/lib/access'
+import {
+  getCompanySectionRoot,
+  getStoredCompany,
+  requiresSelectedCompany,
+} from '@/lib/company'
+
+type MeResponse = {
+  role: string
+}
 
 export default function ProtectedClient({
   children,
@@ -17,10 +26,15 @@ export default function ProtectedClient({
   useEffect(() => {
     async function checkAuth() {
       try {
-        await fetchAPI('/accounts/me/')
+        const me = (await fetchAPI('/accounts/me/')) as MeResponse
 
-        if (isCompanyScopedPath(pathname) && !getStoredCompany()) {
-          router.replace('/dashboard')
+        if (!canAccessPath(me?.role, pathname)) {
+          router.replace(getDefaultPathForRole(me?.role))
+          return
+        }
+
+        if (requiresSelectedCompany(pathname) && !getStoredCompany()) {
+          router.replace(getCompanySectionRoot(pathname) || getDefaultPathForRole(me?.role))
           return
         }
       } catch {

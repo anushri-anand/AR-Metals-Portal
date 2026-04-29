@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { formatDateDdMmmYy } from '@/lib/date-format'
 
 type EmployeeOption = {
   id: number
@@ -114,9 +115,6 @@ export default function TimeSheetViewClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Time Sheet View</h1>
-        <p className="mt-2 text-slate-700">
-          Filter and view saved time-entry records.
-        </p>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -126,7 +124,9 @@ export default function TimeSheetViewClient() {
               type="date"
               value={fromDate}
               onChange={(e) => setFromDate(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                fromDate ? 'text-black' : 'text-neutral-500'
+              }`}
             />
           </Field>
 
@@ -135,7 +135,9 @@ export default function TimeSheetViewClient() {
               type="date"
               value={toDate}
               onChange={(e) => setToDate(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                toDate ? 'text-black' : 'text-neutral-500'
+              }`}
             />
           </Field>
 
@@ -254,7 +256,7 @@ function Field({
 }
 
 function formatDate(value: string) {
-  return new Date(`${value}T00:00:00`).toLocaleDateString()
+  return formatDateDdMmmYy(value)
 }
 
 function formatTime(value: string | null) {

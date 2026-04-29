@@ -14,6 +14,7 @@ from .views import (
     PayrollPreviewAPIView,
     PublicHolidayDateListAPIView,
     SalaryActualIncurredCostAPIView,
+    SalarySummaryAPIView,
     SalaryAdvanceCreateAPIView,
     TimeEntryCreateAPIView,
     TimeEntryListAPIView,
@@ -35,6 +36,7 @@ urlpatterns = [
     path('salary/advance/', SalaryAdvanceCreateAPIView.as_view(), name='salary-advance-create'),
     path('salary/payroll-preview/', PayrollPreviewAPIView.as_view(), name='payroll-preview'),
     path('salary/payroll/', PayrollGenerateAPIView.as_view(), name='payroll-generate'),
+    path('salary/summary/', SalarySummaryAPIView.as_view(), name='salary-summary'),
     path(
         'salary/actual-incurred-cost/',
         SalaryActualIncurredCostAPIView.as_view(),

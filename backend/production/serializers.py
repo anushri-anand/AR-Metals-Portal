@@ -125,6 +125,7 @@ class ProjectItemUpdateSerializer(serializers.Serializer):
 
 class ProjectDetailUpdateSerializer(serializers.Serializer):
     project_number = serializers.CharField(max_length=100)
+    contract_po_ref = serializers.CharField(max_length=255, required=False, allow_blank=True)
     items = ProjectItemUpdateSerializer(many=True)
 
     def validate_project_number(self, value):
@@ -305,8 +306,22 @@ class DeliveryEntryCreateSerializer(serializers.Serializer):
 
 
 class WorkCompletionEntrySerializer(serializers.ModelSerializer):
-    project_number = serializers.CharField(source='project.project_number', read_only=True)
-    project_name = serializers.CharField(source='project.project_name', read_only=True)
+    project_number = serializers.SerializerMethodField()
+    project_name = serializers.SerializerMethodField()
+
+    def get_project_number(self, obj):
+        if obj.contract_id:
+            return obj.contract.project_number
+        if obj.project_id:
+            return obj.project.project_number
+        return ''
+
+    def get_project_name(self, obj):
+        if obj.contract_id:
+            return obj.contract.project_name
+        if obj.project_id:
+            return obj.project.project_name
+        return ''
 
     class Meta:
         model = WorkCompletionEntry
@@ -337,8 +352,22 @@ class WorkCompletionEntrySerializer(serializers.ModelSerializer):
 
 
 class DeliveryEntrySerializer(serializers.ModelSerializer):
-    project_number = serializers.CharField(source='project.project_number', read_only=True)
-    project_name = serializers.CharField(source='project.project_name', read_only=True)
+    project_number = serializers.SerializerMethodField()
+    project_name = serializers.SerializerMethodField()
+
+    def get_project_number(self, obj):
+        if obj.contract_id:
+            return obj.contract.project_number
+        if obj.project_id:
+            return obj.project.project_number
+        return ''
+
+    def get_project_name(self, obj):
+        if obj.contract_id:
+            return obj.contract.project_name
+        if obj.project_id:
+            return obj.project.project_name
+        return ''
 
     class Meta:
         model = DeliveryEntry

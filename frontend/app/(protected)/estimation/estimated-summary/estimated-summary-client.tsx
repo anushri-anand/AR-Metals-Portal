@@ -182,9 +182,6 @@ export default function EstimatedSummaryClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Estimated Summary</h1>
-        <p className="mt-2 text-slate-700">
-          Review the tender-level commercial summary from the saved BOQ and costing data.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 

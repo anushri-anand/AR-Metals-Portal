@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import ProjectSelectFields from '@/components/project-select-fields'
 import { fetchAPI } from '@/lib/api'
+import { hasRoleAccess } from '@/lib/access'
 import { ContractRevenue, formatMoney, getContractRevenues } from '@/lib/estimation-storage'
 
 type ProjectSelection = {
@@ -350,14 +351,6 @@ export default function PcrClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">PROJECT COST REPORT</h1>
-        <p className="mt-2 text-slate-700">
-          Review contract budget, committed cost, actual incurred cost, and gross
-          profit for the selected project.
-        </p>
-        <p className="mt-2 text-xs text-slate-500">
-          Remaining Cost Required starts from the system-calculated value, but you
-          can edit it directly in the table when needed.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -419,7 +412,9 @@ export default function PcrClient() {
               >
                 {saving ? 'Submitting...' : 'Submit'}
               </button>
-              {role === 'admin' && matchingSnapshot && matchingSnapshot.status !== 'approved' ? (
+              {hasRoleAccess(role, ['manager', 'admin']) &&
+              matchingSnapshot &&
+              matchingSnapshot.status !== 'approved' ? (
                 <button
                   type="button"
                   onClick={() => handleApprove(matchingSnapshot.id)}
@@ -468,9 +463,6 @@ export default function PcrClient() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 p-6">
           <h2 className="text-lg font-semibold text-slate-900">Saved PCR Entries</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Submitted quarter-wise snapshots are listed here for review and approval.
-          </p>
         </div>
 
         <div className="max-h-[50vh] overflow-auto">
@@ -517,7 +509,8 @@ export default function PcrClient() {
                       </button>
                     </BodyCell>
                     <BodyCell>
-                      {role === 'admin' && snapshot.status !== 'approved' ? (
+                      {hasRoleAccess(role, ['manager', 'admin']) &&
+                      snapshot.status !== 'approved' ? (
                         <button
                           type="button"
                           onClick={() => handleApprove(snapshot.id)}
@@ -815,10 +808,7 @@ function buildPcrReport(
 ): BuiltReport {
   const revenue = findRevenueEntry(data.revenues, selection)
   const originalContract = toNumber(revenue?.contractValue)
-  const agreedVariations = (revenue?.variations || []).reduce(
-    (total, variation) => total + toNumber(variation.amount),
-    0
-  )
+  const agreedVariations = toNumber(revenue?.agreedVariationTotal)
   const revisedContractValue = originalContract + agreedVariations
   const budgetTotals = createCategoryAmountMap()
   const variationBudgetTotals = createCategoryAmountMap()

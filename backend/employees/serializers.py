@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 from shared.account_codes import normalize_account_code_for_cost_code
 
@@ -14,6 +14,7 @@ from .models import (
     Employee,
     EmployeeDetailHistory,
     PayrollRecord,
+    PublicHolidayDate,
     SalaryAdvance,
     SalaryAdvanceDeduction,
     TimeEntry,
@@ -143,6 +144,7 @@ class EmployeeUpdateSerializer(serializers.Serializer):
 class TimeEntrySerializer(serializers.ModelSerializer):
     employee_id = serializers.CharField(source='employee.employee_id', read_only=True)
     employee_name = serializers.CharField(source='employee.employee_name', read_only=True)
+    finish_time = serializers.SerializerMethodField()
 
     class Meta:
         model = TimeEntry
@@ -179,6 +181,15 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             'created_at',
         ]
 
+    def get_finish_time(self, obj):
+        if obj.finish_time_is_2400:
+            return '24:00:00'
+
+        if not obj.finish_time:
+            return None
+
+        return obj.finish_time.strftime('%H:%M:%S')
+
 
 class TimeEntryCreateSerializer(serializers.Serializer):
     employee_id = serializers.CharField(max_length=50)
@@ -186,7 +197,7 @@ class TimeEntryCreateSerializer(serializers.Serializer):
     is_public_holiday = serializers.BooleanField(default=False)
 
     start_time = serializers.TimeField(required=False, allow_null=True)
-    finish_time = serializers.TimeField(required=False, allow_null=True)
+    finish_time = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     regular_duty_hours = serializers.DecimalField(max_digits=6, decimal_places=2)
 
@@ -220,7 +231,11 @@ class TimeEntryCreateSerializer(serializers.Serializer):
         is_leave_or_absent = medical_leave_with_doc or medical_leave_without_doc or absent
 
         start_time = attrs.get('start_time')
-        finish_time = attrs.get('finish_time')
+        finish_time_raw = attrs.get('finish_time')
+        finish_time, finish_time_is_2400 = self.parse_finish_time(finish_time_raw)
+
+        attrs['finish_time'] = finish_time
+        attrs['finish_time_is_2400'] = finish_time_is_2400
 
         if not is_leave_or_absent:
             if not start_time or not finish_time:
@@ -228,12 +243,39 @@ class TimeEntryCreateSerializer(serializers.Serializer):
                     'Start time and finish time are required unless leave or absent is selected.'
                 )
 
-            if finish_time <= start_time:
+            start_minutes = (start_time.hour * 60) + start_time.minute
+            finish_minutes = 24 * 60 if finish_time_is_2400 else (
+                (finish_time.hour * 60) + finish_time.minute
+            )
+
+            if finish_minutes <= start_minutes:
                 raise serializers.ValidationError(
                     'Finish time must be later than start time.'
                 )
 
         return attrs
+
+    def parse_finish_time(self, value):
+        if value in (None, ''):
+            return None, False
+
+        if value == '24:00':
+            return time(hour=0, minute=0), True
+
+        try:
+            parsed_value = datetime.strptime(value, '%H:%M').time()
+        except ValueError as exc:
+            raise serializers.ValidationError(
+                {'finish_time': 'Enter a valid finish time in HH:MM format.'}
+            ) from exc
+
+        return parsed_value, False
+
+
+class PublicHolidayDateCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PublicHolidayDate
+        fields = ['date']
 
 
 class AnnualLeaveSerializer(serializers.ModelSerializer):
@@ -873,8 +915,11 @@ class PayrollRequestSerializer(serializers.Serializer):
 
 
 class PayrollResponseSerializer(serializers.Serializer):
+    company_code = serializers.CharField()
+    company_display_name = serializers.CharField()
     employee_id = serializers.CharField()
     employee_name = serializers.CharField()
+    category = serializers.CharField()
     month = serializers.IntegerField()
     year = serializers.IntegerField()
 
@@ -957,6 +1002,53 @@ class PayrollRecordSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = fields
+
+
+class SalarySummaryRowSerializer(serializers.Serializer):
+    sn = serializers.IntegerField()
+    employee_id = serializers.CharField()
+    employee_name = serializers.CharField()
+    basic = serializers.DecimalField(max_digits=12, decimal_places=2)
+    allow = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_working_days = serializers.DecimalField(max_digits=12, decimal_places=2)
+    normal_ot_hours = serializers.DecimalField(max_digits=12, decimal_places=2)
+    sunday_ot_hours = serializers.DecimalField(max_digits=12, decimal_places=2)
+    public_holiday_ot_hours = serializers.DecimalField(max_digits=12, decimal_places=2)
+    earned_basic = serializers.DecimalField(max_digits=12, decimal_places=2)
+    earned_allow = serializers.DecimalField(max_digits=12, decimal_places=2)
+    earned_ot_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    gross_salary = serializers.DecimalField(max_digits=12, decimal_places=2)
+    incentive = serializers.DecimalField(max_digits=12, decimal_places=2)
+    advance_deduction = serializers.DecimalField(max_digits=12, decimal_places=2)
+    other_deduction = serializers.DecimalField(max_digits=12, decimal_places=2)
+    salary_payable = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class SalarySummaryTotalsSerializer(serializers.Serializer):
+    basic = serializers.DecimalField(max_digits=12, decimal_places=2)
+    allow = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_working_days = serializers.DecimalField(max_digits=12, decimal_places=2)
+    normal_ot_hours = serializers.DecimalField(max_digits=12, decimal_places=2)
+    sunday_ot_hours = serializers.DecimalField(max_digits=12, decimal_places=2)
+    public_holiday_ot_hours = serializers.DecimalField(max_digits=12, decimal_places=2)
+    earned_basic = serializers.DecimalField(max_digits=12, decimal_places=2)
+    earned_allow = serializers.DecimalField(max_digits=12, decimal_places=2)
+    earned_ot_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    gross_salary = serializers.DecimalField(max_digits=12, decimal_places=2)
+    incentive = serializers.DecimalField(max_digits=12, decimal_places=2)
+    advance_deduction = serializers.DecimalField(max_digits=12, decimal_places=2)
+    other_deduction = serializers.DecimalField(max_digits=12, decimal_places=2)
+    salary_payable = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class SalarySummaryResponseSerializer(serializers.Serializer):
+    company = serializers.CharField()
+    company_display_name = serializers.CharField()
+    month = serializers.IntegerField()
+    year = serializers.IntegerField()
+    category = serializers.CharField()
+    rows = SalarySummaryRowSerializer(many=True)
+    totals = SalarySummaryTotalsSerializer()
 
 
 class SalaryActualIncurredCostRowSerializer(serializers.Serializer):

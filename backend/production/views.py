@@ -6,13 +6,21 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Sum
 from rest_framework import status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
+from accounts.roles import ROLE_ADMIN, get_user_role
+from accounts.permissions import ApiRoleAccessPermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from employees.models import EmployeeDetailHistory, TimeEntry
-from estimation.models import BoqItem, TenderCosting, TenderLog
+from estimation.models import (
+    BoqItem,
+    ContractRevenue,
+    ContractVariationLog,
+    TenderCosting,
+    TenderLog,
+)
 from shared.account_codes import normalize_account_code_for_cost_code
 from shared.company import get_company_from_request
 from shared.period_closing import ensure_request_dates_in_open_period
@@ -58,6 +66,19 @@ PRODUCTION_STAGE_FIELDS = [
 ]
 WORK_COMPLETION_STAGE_KEYS = [key for key, _ in PRODUCTION_STAGE_FIELDS if key != 'delivery']
 TIME_ALLOCATION_LABOUR_COST_CODES = {'Production Labour', 'Installation Labour'}
+ALL_VARIATIONS_VALUE = '__ALL__'
+ORIGINAL_CONTRACT_WORK_ORDER = 'OC'
+MH_COMPARISON_STAGES = [
+    'Cutting',
+    'Grooving',
+    'Bending',
+    'Fabrication',
+    'Welding',
+    'Finishing',
+    'Coating',
+    'Assembly',
+    'Installation',
+]
 
 
 def get_revision_sort_key(value):
@@ -68,6 +89,40 @@ def get_revision_sort_key(value):
         return (1, int(numbers[-1]), text)
 
     return (0, 0, text)
+
+
+def normalize_variation_number(value):
+    text = str(value or '').strip()
+
+    if not text:
+        return ''
+
+    if text == ALL_VARIATIONS_VALUE:
+        return ALL_VARIATIONS_VALUE
+
+    numbers = re.findall(r'\d+', text)
+
+    if numbers:
+        return f'RFV #{int(numbers[-1])}'
+
+    return text
+
+
+def get_variation_sort_key(value):
+    normalized_value = normalize_variation_number(value)
+
+    if not normalized_value:
+        return (0, 0, normalized_value)
+
+    if normalized_value == ALL_VARIATIONS_VALUE:
+        return (1, 0, normalized_value)
+
+    numbers = re.findall(r'\d+', normalized_value)
+
+    if numbers:
+        return (2, int(numbers[-1]), normalized_value)
+
+    return (3, 0, normalized_value)
 
 
 def get_estimated_mh(costing):
@@ -143,15 +198,390 @@ def normalize_time_allocation_cost_codes(employee_id, cost_code, account_code):
     return (trimmed_cost_code, normalized_account_code)
 
 
+def get_latest_contract_revenues(company):
+    latest_revenues = []
+    seen_projects = set()
+
+    for revenue in ContractRevenue.objects.filter(company=company).order_by(
+        'project_number',
+        'project_name',
+        '-created_at',
+        '-id',
+    ):
+        project_key = (
+            str(revenue.project_number or '').strip(),
+            str(revenue.project_name or '').strip(),
+        )
+
+        if project_key in seen_projects:
+            continue
+
+        seen_projects.add(project_key)
+        latest_revenues.append(revenue)
+
+    return latest_revenues
+
+
+def get_latest_tender_for_project_name(company, project_name):
+    tenders = list(
+        TenderLog.objects.filter(
+            company=company,
+            project_name=str(project_name or '').strip(),
+        )
+    )
+
+    if not tenders:
+        return None
+
+    return max(
+        tenders,
+        key=lambda tender: (
+            get_revision_sort_key(tender.revision_number or ''),
+            tender.updated_at,
+            tender.id,
+        ),
+    )
+
+
+def build_contract_project_option_payload(company, revenue):
+    tender = get_latest_tender_for_project_name(company, revenue.project_name)
+    tender_snapshot = (
+        get_tender_project_snapshot(company, tender.tender_number)
+        if tender
+        else None
+    )
+
+    project = {
+        'id': revenue.id,
+        'contract_id': revenue.id,
+        'tender_number': tender.tender_number if tender else '',
+        'revision_number': (
+            str(tender_snapshot.get('revision_number') or '')
+            if tender_snapshot
+            else str(tender.revision_number or '') if tender else ''
+        ),
+        'project_name': revenue.project_name,
+        'project_number': revenue.project_number,
+        'contract_po_ref': revenue.contract_ref,
+        'items': [],
+        'variations': [],
+    }
+
+    for item_index, item in enumerate(tender_snapshot.get('items', []) if tender_snapshot else []):
+        project['items'].append(
+            {
+                'id': f'{revenue.id}:base:{item_index}',
+                'boq_sn': item.get('boq_sn', ''),
+                'package': item.get('package', ''),
+                'item_name': item.get('item_name', ''),
+                'quantity': item.get('quantity', '0.00'),
+                'unit': item.get('unit', ''),
+                'estimated_mh': item.get('estimated_mh', '0.00'),
+            }
+        )
+
+    variation_numbers = get_contract_variation_numbers_for_project(company, project)
+    variation_rows_map = {
+        variation_number: get_contract_variation_rows(company, project, variation_number)
+        for variation_number in variation_numbers
+    }
+    costing_map = {
+        costing.boq_item_id: costing
+        for costing in TenderCosting.objects.filter(
+            boq_item_id__in=[
+                row.id
+                for rows in variation_rows_map.values()
+                for row in rows
+            ]
+        ).prefetch_related('labour_lines')
+    }
+
+    project['variations'] = [
+        {
+            'id': f'{revenue.id}:{variation_number}',
+            'variation_number': variation_number,
+            'items': [
+                {
+                    'id': row.id,
+                    'boq_sn': row.sn or '',
+                    'package': row.package or '',
+                    'item_name': row.description,
+                    'quantity': serialize_decimal(row.quantity),
+                    'unit': row.unit,
+                    'estimated_mh': serialize_decimal(
+                        get_estimated_mh(costing_map.get(row.id))
+                    ),
+                }
+                for row in variation_rows_map[variation_number]
+            ],
+        }
+        for variation_number in variation_numbers
+    ]
+
+    return project
+
+
+def get_contract_project_options(company):
+    return [
+        build_contract_project_option_payload(company, revenue)
+        for revenue in get_latest_contract_revenues(company)
+    ]
+
+
+def ensure_admin_dashboard_access(request):
+    if get_user_role(request.user) != ROLE_ADMIN:
+        raise PermissionDenied('Dashboard data is only available for Admin users.')
+
+
+def get_latest_original_contract_rows(company, tender_number):
+    rows = list(
+        BoqItem.objects.filter(
+            company=company,
+            tender_number=tender_number,
+            variation_number='',
+        )
+    )
+
+    if not rows:
+        return []
+
+    latest_revision_number = max(
+        {row.revision_number or '' for row in rows},
+        key=get_revision_sort_key,
+    )
+
+    return [
+        row
+        for row in rows
+        if (row.revision_number or '') == latest_revision_number
+    ]
+
+
+def build_labour_costing_map(boq_rows):
+    row_ids = [row.id for row in boq_rows]
+
+    if not row_ids:
+        return {}
+
+    return {
+        costing.boq_item_id: costing
+        for costing in TenderCosting.objects.filter(
+            boq_item_id__in=row_ids
+        ).prefetch_related('labour_lines')
+    }
+
+
+def build_stage_hours_from_rows(boq_rows, package=''):
+    package = str(package or '').strip()
+    stage_totals = {
+        stage: Decimal('0.00')
+        for stage in MH_COMPARISON_STAGES
+    }
+    filtered_rows = [
+        row
+        for row in boq_rows
+        if not package or (row.package or '') == package
+    ]
+    costing_map = build_labour_costing_map(filtered_rows)
+
+    for row in filtered_rows:
+        costing = costing_map.get(row.id)
+        if not costing:
+            continue
+
+        for labour_line in costing.labour_lines.all():
+            if labour_line.stage not in stage_totals:
+                continue
+
+            stage_totals[labour_line.stage] += Decimal(labour_line.hours or 0)
+
+    return stage_totals
+
+
+def get_project_estimated_stage_hours(company, project, package='', work_order=ALL_VARIATIONS_VALUE):
+    normalized_work_order = str(work_order or '').strip() or ALL_VARIATIONS_VALUE
+    estimated_stage_hours = {
+        stage: Decimal('0.00')
+        for stage in MH_COMPARISON_STAGES
+    }
+
+    include_base_project = normalized_work_order in {
+        '',
+        ALL_VARIATIONS_VALUE,
+        ORIGINAL_CONTRACT_WORK_ORDER,
+    }
+
+    if include_base_project:
+        for stage, hours in build_stage_hours_from_rows(
+            get_latest_original_contract_rows(company, project['tender_number']),
+            package=package,
+        ).items():
+            estimated_stage_hours[stage] += hours
+
+    variation_numbers = []
+
+    if normalized_work_order == ALL_VARIATIONS_VALUE:
+        variation_numbers = get_contract_variation_numbers_for_project(company, project)
+    elif normalized_work_order not in {'', ORIGINAL_CONTRACT_WORK_ORDER}:
+        variation_numbers = [normalize_variation_number(normalized_work_order)]
+
+    for variation_number in variation_numbers:
+        for stage, hours in build_stage_hours_from_rows(
+            get_contract_variation_rows(company, project, variation_number),
+            package=package,
+        ).items():
+            estimated_stage_hours[stage] += hours
+
+    return estimated_stage_hours
+
+
+def get_project_actual_total_mh(company, project, package='', work_order=ALL_VARIATIONS_VALUE):
+    normalized_work_order = str(work_order or '').strip() or ALL_VARIATIONS_VALUE
+    lines = TimeAllocationLine.objects.select_related('entry').filter(
+        entry__company=company,
+        project_number=project['project_number'],
+        project_name=project['project_name'],
+    )
+
+    if package:
+        lines = lines.filter(package=package)
+
+    if normalized_work_order == ORIGINAL_CONTRACT_WORK_ORDER:
+        lines = lines.filter(variation_number='')
+    elif normalized_work_order not in {'', ALL_VARIATIONS_VALUE}:
+        lines = lines.filter(
+            variation_number=normalize_variation_number(normalized_work_order)
+        )
+
+    lines = list(lines)
+
+    if not lines:
+        return Decimal('0.00')
+
+    employee_ids = sorted({line.entry.employee_id for line in lines if line.entry.employee_id})
+    allocation_dates = sorted({line.entry.date for line in lines if line.entry.date})
+
+    time_entry_map = {
+        (time_entry.employee.employee_id, time_entry.date): time_entry
+        for time_entry in TimeEntry.objects.select_related('employee').filter(
+            employee__employee_id__in=employee_ids,
+            date__in=allocation_dates,
+        )
+    }
+
+    total_hours = Decimal('0.00')
+
+    for line in lines:
+        time_entry = time_entry_map.get((line.entry.employee_id, line.entry.date))
+        if not time_entry:
+            continue
+
+        total_hours += (
+            Decimal(time_entry.total_time or 0)
+            * Decimal(line.percentage or 0)
+            / Decimal('100')
+        )
+
+    return total_hours.quantize(Decimal('0.01'))
+
+
+def build_estimated_vs_actual_mh_payload(
+    company,
+    project_number='',
+    project_name='',
+    package='',
+    work_order=ALL_VARIATIONS_VALUE,
+):
+    project_number = str(project_number or '').strip()
+    project_name = str(project_name or '').strip()
+    package = str(package or '').strip()
+    work_order = str(work_order or '').strip() or ALL_VARIATIONS_VALUE
+
+    project_options = get_contract_project_options(company)
+
+    if project_number or project_name:
+        project_options = [
+            project
+            for project in project_options
+            if (
+                (project_number and project['project_number'] == project_number)
+                or (project_name and project['project_name'] == project_name)
+            )
+        ]
+
+    estimated_stage_totals = {
+        stage: Decimal('0.00')
+        for stage in MH_COMPARISON_STAGES
+    }
+    actual_stage_totals = {
+        stage: Decimal('0.00')
+        for stage in MH_COMPARISON_STAGES
+    }
+
+    for project in project_options:
+        project_estimated_stage_hours = get_project_estimated_stage_hours(
+            company,
+            project,
+            package=package,
+            work_order=work_order,
+        )
+        project_actual_total_mh = get_project_actual_total_mh(
+            company,
+            project,
+            package=package,
+            work_order=work_order,
+        )
+        project_estimated_total_mh = sum(
+            project_estimated_stage_hours.values(),
+            Decimal('0.00'),
+        )
+
+        for stage, hours in project_estimated_stage_hours.items():
+            estimated_stage_totals[stage] += hours
+
+        if project_actual_total_mh > 0 and project_estimated_total_mh > 0:
+            for stage, estimated_hours in project_estimated_stage_hours.items():
+                actual_stage_totals[stage] += (
+                    project_actual_total_mh
+                    * estimated_hours
+                    / project_estimated_total_mh
+                )
+
+    estimated_total_mh = sum(estimated_stage_totals.values(), Decimal('0.00'))
+    actual_total_mh = sum(actual_stage_totals.values(), Decimal('0.00'))
+
+    return {
+        'project_number': project_number,
+        'project_name': project_name,
+        'package': package,
+        'work_order': work_order,
+        'estimated_total_mh': serialize_decimal(estimated_total_mh),
+        'actual_total_mh': serialize_decimal(actual_total_mh),
+        'stages': [
+            {
+                'key': stage.lower(),
+                'label': stage,
+                'estimated_mh': serialize_decimal(estimated_stage_totals[stage]),
+                'actual_mh': serialize_decimal(actual_stage_totals[stage]),
+            }
+            for stage in MH_COMPARISON_STAGES
+        ],
+    }
+
+
 def get_project_for_selection(company, project_number, project_name):
     project_number = str(project_number or '').strip()
     project_name = str(project_name or '').strip()
 
-    project = ProjectDetail.objects.filter(
-        company=company,
-        project_number=project_number,
-        project_name=project_name,
-    ).first()
+    project = next(
+        (
+            option
+            for option in get_contract_project_options(company)
+            if option['project_number'] == project_number
+            and option['project_name'] == project_name
+        ),
+        None,
+    )
 
     if not project:
         raise ValidationError(
@@ -171,11 +601,13 @@ def resolve_project_item_selection(
     project_number,
     project_name,
     variation_number='',
+    package='',
     item_name='',
     boq_sn='',
 ):
     project = get_project_for_selection(company, project_number, project_name)
-    variation_number = str(variation_number or '').strip()
+    variation_number = normalize_variation_number(variation_number)
+    package = str(package or '').strip()
     item_name = str(item_name or '').strip()
     boq_sn = str(boq_sn or '').strip()
 
@@ -183,76 +615,99 @@ def resolve_project_item_selection(
         raise ValidationError({'item_name': 'Item is required.'})
 
     if variation_number:
-        variation = ProjectVariation.objects.filter(
-            project=project,
-            variation_number=variation_number,
-        ).first()
+        if variation_number == ALL_VARIATIONS_VALUE:
+            raise ValidationError(
+                {'variation_number': 'Select Base Project or a specific RFV # for Delivery.'}
+            )
 
-        if not variation:
+        variation_items = get_contract_variation_rows(company, project, variation_number)
+
+        if not variation_items:
             raise ValidationError(
                 {
                     'variation_number': (
                         f'Variation {variation_number} not found for '
-                        f'{project.project_number}.'
+                        f'{project["project_number"]}.'
                     )
                 }
             )
 
-        variation_item = ProjectVariationItem.objects.filter(
-            variation=variation,
-            item_name=item_name,
-        ).order_by('id').first()
+        matching_variation_items = [
+            row
+            for row in variation_items
+            if row.description == item_name
+            and (not package or (row.package or '') == package)
+        ]
 
-        if not variation_item:
+        if boq_sn:
+            matching_variation_items = [
+                row for row in matching_variation_items if (row.sn or '') == boq_sn
+            ]
+
+        if not matching_variation_items:
             raise ValidationError(
                 {
                     'item_name': (
-                        f'Variation item not found for {project.project_number} / '
+                        f'Variation item not found for {project["project_number"]} / '
                         f'{variation_number} / {item_name}.'
                     )
                 }
             )
 
+        if not boq_sn and len(matching_variation_items) > 1:
+            raise ValidationError(
+                {'boq_sn': 'Select BOQ SN for the selected variation item.'}
+            )
+
+        variation_item = matching_variation_items[0]
+
         return {
             'project': project,
+            'contract': ContractRevenue.objects.get(pk=project['contract_id']),
+            'project_number': project['project_number'],
+            'project_name': project['project_name'],
             'variation_number': variation_number,
-            'boq_sn': '',
-            'item_name': variation_item.item_name,
+            'package': variation_item.package or package,
+            'boq_sn': variation_item.sn or '',
+            'item_name': variation_item.description,
             'total_quantity': variation_item.quantity,
             'unit': variation_item.unit,
         }
 
-    project_items = ProjectItem.objects.filter(
-        project=project,
-        item_name=item_name,
-    )
+    project_items = [
+        item
+        for item in project.get('items', [])
+        if item.get('item_name', '') == item_name
+        and (not package or item.get('package', '') == package)
+        and (not boq_sn or item.get('boq_sn', '') == boq_sn)
+    ]
 
-    if boq_sn:
-        project_items = project_items.filter(boq_sn=boq_sn)
-
-    if not project_items.exists():
+    if not project_items:
         raise ValidationError(
             {
                 'item_name': (
-                    f'Item not found for {project.project_number} / '
+                    f'Item not found for {project["project_number"]} / '
                     f'{item_name} / {boq_sn or "No BOQ SN"}.'
                 )
             }
         )
 
-    if not boq_sn and project_items.count() > 1:
+    if not boq_sn and len(project_items) > 1:
         raise ValidationError({'boq_sn': 'Select BOQ SN for the selected item.'})
 
-    project_item = project_items.order_by('id').first()
+    project_item = project_items[0]
 
     return {
         'project': project,
+        'contract': ContractRevenue.objects.get(pk=project['contract_id']),
+        'project_number': project['project_number'],
+        'project_name': project['project_name'],
         'variation_number': '',
-        'package': project_item.package,
-        'boq_sn': project_item.boq_sn,
-        'item_name': project_item.item_name,
-        'total_quantity': project_item.quantity,
-        'unit': project_item.unit,
+        'package': project_item.get('package', ''),
+        'boq_sn': project_item.get('boq_sn', ''),
+        'item_name': project_item.get('item_name', ''),
+        'total_quantity': Decimal(project_item.get('quantity', '0') or '0'),
+        'unit': project_item.get('unit', ''),
     }
 
 
@@ -264,30 +719,72 @@ def resolve_project_package_selection(
     package='',
 ):
     project = get_project_for_selection(company, project_number, project_name)
-    variation_number = str(variation_number or '').strip()
+    variation_number = normalize_variation_number(variation_number)
     package = str(package or '').strip()
 
     if variation_number:
-        variation = ProjectVariation.objects.filter(
-            project=project,
-            variation_number=variation_number,
-        ).first()
+        if variation_number == ALL_VARIATIONS_VALUE:
+            if not package:
+                raise ValidationError({'package': 'Package is required.'})
 
-        if not variation:
-            raise ValidationError(
+            base_items = list(
+                item
+                for item in project.get('items', [])
+                if item.get('package', '') == package
+            )
+            variation_items = [
+                row
+                for row in get_all_contract_variation_rows(company, project)
+                if (row.package or '') == package
+            ]
+
+            if not base_items and not variation_items:
+                raise ValidationError(
+                    {'package': f'Package not found for {project["project_number"]} / {package}.'}
+                )
+
+            total_quantity = (
+                sum(
+                    (Decimal(item.get('quantity', '0') or '0') for item in base_items),
+                    Decimal('0.00'),
+                )
+                + sum((Decimal(item.quantity) for item in variation_items), Decimal('0.00'))
+            )
+            units = sorted(
                 {
-                    'variation_number': (
-                        f'Variation {variation_number} not found for '
-                        f'{project.project_number}.'
-                    )
+                    *(item.get('unit', '') for item in base_items if item.get('unit')),
+                    *((item.unit or '') for item in variation_items if item.unit),
                 }
             )
 
-        variation_items = list(ProjectVariationItem.objects.filter(variation=variation))
+            return {
+                'project': project,
+                'contract': ContractRevenue.objects.get(pk=project['contract_id']),
+                'project_number': project['project_number'],
+                'project_name': project['project_name'],
+                'variation_number': '',
+                'package': package,
+                'boq_sn': '',
+                'item_name': '',
+                'total_quantity': total_quantity,
+                'unit': units[0] if len(units) == 1 else 'Mixed',
+            }
+
+        variation_items = get_contract_variation_rows(company, project, variation_number)
 
         if not variation_items:
             raise ValidationError(
                 {'variation_number': 'No variation items found for the selected variation.'}
+            )
+
+        if package:
+            variation_items = [
+                row for row in variation_items if (row.package or '') == package
+            ]
+
+        if not variation_items:
+            raise ValidationError(
+                {'package': f'Package not found for {project["project_number"]} / {package}.'}
             )
 
         total_quantity = sum((Decimal(item.quantity) for item in variation_items), Decimal('0.00'))
@@ -295,8 +792,11 @@ def resolve_project_package_selection(
 
         return {
             'project': project,
+            'contract': ContractRevenue.objects.get(pk=project['contract_id']),
+            'project_number': project['project_number'],
+            'project_name': project['project_name'],
             'variation_number': variation_number,
-            'package': '',
+            'package': package,
             'boq_sn': '',
             'item_name': '',
             'total_quantity': total_quantity,
@@ -306,23 +806,28 @@ def resolve_project_package_selection(
     if not package:
         raise ValidationError({'package': 'Package is required.'})
 
-    project_items = list(
-        ProjectItem.objects.filter(
-            project=project,
-            package=package,
-        ).order_by('id')
-    )
+    project_items = [
+        item
+        for item in project.get('items', [])
+        if item.get('package', '') == package
+    ]
 
     if not project_items:
         raise ValidationError(
-            {'package': f'Package not found for {project.project_number} / {package}.'}
+            {'package': f'Package not found for {project["project_number"]} / {package}.'}
         )
 
-    total_quantity = sum((Decimal(item.quantity) for item in project_items), Decimal('0.00'))
-    units = sorted({item.unit for item in project_items if item.unit})
+    total_quantity = sum(
+        (Decimal(item.get('quantity', '0') or '0') for item in project_items),
+        Decimal('0.00'),
+    )
+    units = sorted({item.get('unit', '') for item in project_items if item.get('unit')})
 
     return {
         'project': project,
+        'contract': ContractRevenue.objects.get(pk=project['contract_id']),
+        'project_number': project['project_number'],
+        'project_name': project['project_name'],
         'variation_number': '',
         'package': package,
         'boq_sn': '',
@@ -334,9 +839,11 @@ def resolve_project_package_selection(
 
 def get_status_entry_filters(resolved_item):
     filters = {
-        'project': resolved_item['project'],
-        'variation_number': resolved_item['variation_number'],
+        'contract': resolved_item['contract'],
     }
+
+    if resolved_item['variation_number'] != ALL_VARIATIONS_VALUE:
+        filters['variation_number'] = resolved_item['variation_number']
 
     if resolved_item.get('package'):
         filters['package'] = resolved_item['package']
@@ -387,14 +894,17 @@ def get_designation_for_date(history_rows, target_date):
 def build_designation_hours_by_period(company, resolved_item, basis, date_from=None, date_to=None):
     lines = TimeAllocationLine.objects.select_related('entry').filter(
         entry__company=company,
-        project_number=resolved_item['project'].project_number,
-        project_name=resolved_item['project'].project_name,
-        variation_number=resolved_item['variation_number'],
-        package=resolved_item['package'],
+        project_number=resolved_item['project_number'],
+        project_name=resolved_item['project_name'],
     )
 
-    if resolved_item['variation_number']:
+    if resolved_item['variation_number'] == ALL_VARIATIONS_VALUE:
+        if resolved_item['package']:
+            lines = lines.filter(package=resolved_item['package'])
+    elif resolved_item['variation_number']:
         lines = lines.filter(variation_number=resolved_item['variation_number'])
+        if resolved_item['package']:
+            lines = lines.filter(package=resolved_item['package'])
     else:
         lines = lines.filter(variation_number='')
         if resolved_item['package']:
@@ -462,7 +972,11 @@ def get_tender_project_snapshot(company, tender_number):
     tender_revision_number = str(tender.revision_number or '').strip()
 
     boq_items = list(
-        BoqItem.objects.filter(company=company, tender_number=tender_number)
+        BoqItem.objects.filter(
+            company=company,
+            tender_number=tender_number,
+            variation_number='',
+        )
     )
 
     if not boq_items:
@@ -514,21 +1028,183 @@ def get_tender_project_snapshot(company, tender_number):
     }
 
 
+def get_contract_variation_numbers_for_project(company, project):
+    project_number = (
+        project['project_number'] if isinstance(project, dict) else project.project_number
+    )
+    tender_number = (
+        project['tender_number'] if isinstance(project, dict) else project.tender_number
+    )
+    log_numbers = {
+        normalize_variation_number(log.rfv_number)
+        for log in ContractVariationLog.objects.filter(
+            company=company,
+            project_number=project_number,
+        )
+    }
+    boq_numbers = {
+        normalize_variation_number(variation_number)
+        for variation_number in BoqItem.objects.filter(
+            company=company,
+            tender_number=tender_number,
+        )
+        .exclude(variation_number='')
+        .values_list('variation_number', flat=True)
+    }
+
+    return sorted(
+        {
+            variation_number
+            for variation_number in log_numbers | boq_numbers
+            if variation_number
+        },
+        key=get_variation_sort_key,
+    )
+
+
+def get_contract_variation_rows(company, project, variation_number):
+    normalized_variation_number = normalize_variation_number(variation_number)
+    tender_number = (
+        project['tender_number'] if isinstance(project, dict) else project.tender_number
+    )
+
+    if not normalized_variation_number or normalized_variation_number == ALL_VARIATIONS_VALUE:
+        return []
+
+    rows = [
+        row
+        for row in BoqItem.objects.filter(
+            company=company,
+            tender_number=tender_number,
+        ).exclude(variation_number='')
+        if normalize_variation_number(row.variation_number) == normalized_variation_number
+    ]
+
+    if not rows:
+        return []
+
+    latest_revision_number = max(
+        {row.revision_number or '' for row in rows},
+        key=get_revision_sort_key,
+    )
+
+    return [
+        row
+        for row in rows
+        if (row.revision_number or '') == latest_revision_number
+    ]
+
+
+def get_all_contract_variation_rows(company, project):
+    rows = []
+
+    for variation_number in get_contract_variation_numbers_for_project(company, project):
+        rows.extend(get_contract_variation_rows(company, project, variation_number))
+
+    return rows
+
+
+def build_project_option_payload(company, project):
+    variation_numbers = get_contract_variation_numbers_for_project(company, project)
+    variation_rows_map = {
+        variation_number: get_contract_variation_rows(company, project, variation_number)
+        for variation_number in variation_numbers
+    }
+    costing_map = {
+        costing.boq_item_id: costing
+        for costing in TenderCosting.objects.filter(
+            boq_item_id__in=[
+                row.id
+                for rows in variation_rows_map.values()
+                for row in rows
+            ]
+        ).prefetch_related('labour_lines')
+    }
+
+    return {
+        'id': project.id,
+        'tender_number': project.tender_number,
+        'revision_number': project.revision_number,
+        'project_name': project.project_name,
+        'project_number': project.project_number,
+        'contract_po_ref': project.contract_po_ref,
+        'items': [
+            {
+                'id': item.id,
+                'boq_sn': item.boq_sn,
+                'package': item.package,
+                'item_name': item.item_name,
+                'quantity': serialize_decimal(item.quantity),
+                'unit': item.unit,
+                'estimated_mh': serialize_decimal(item.estimated_mh),
+            }
+            for item in project.items.all()
+        ],
+        'variations': [
+            {
+                'id': f'{project.id}:{variation_number}',
+                'variation_number': variation_number,
+                'items': [
+                    {
+                        'id': row.id,
+                        'boq_sn': row.sn or '',
+                        'package': row.package or '',
+                        'item_name': row.description,
+                        'quantity': serialize_decimal(row.quantity),
+                        'unit': row.unit,
+                        'estimated_mh': serialize_decimal(
+                            get_estimated_mh(costing_map.get(row.id))
+                        ),
+                    }
+                    for row in variation_rows_map[variation_number]
+                ],
+            }
+            for variation_number in variation_numbers
+        ],
+    }
+
+
 class ProjectOptionsAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
         projects = ProjectDetail.objects.prefetch_related(
             'items',
-            'variations__items',
         ).filter(company=company).order_by('project_number')
-        serializer = ProjectDetailSerializer(projects, many=True)
-        return Response(serializer.data)
+        return Response(
+            [build_project_option_payload(company, project) for project in projects]
+        )
+
+
+class ProductionContractOptionsAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+
+    def get(self, request):
+        company = get_company_from_request(request)
+        return Response(get_contract_project_options(company))
+
+
+class DashboardEstimatedVsActualMhAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+
+    def get(self, request):
+        ensure_admin_dashboard_access(request)
+        company = get_company_from_request(request)
+
+        return Response(
+            build_estimated_vs_actual_mh_payload(
+                company=company,
+                project_number=request.query_params.get('project_number', ''),
+                project_name=request.query_params.get('project_name', ''),
+                package=request.query_params.get('package', ''),
+                work_order=request.query_params.get('work_order', ALL_VARIATIONS_VALUE),
+            )
+        )
 
 
 class ProjectTenderOptionsAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -547,7 +1223,7 @@ class ProjectTenderOptionsAPIView(APIView):
 
 
 class ProjectDetailEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -594,7 +1270,7 @@ class ProjectDetailEntryAPIView(APIView):
 
 
 class ProjectDetailListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -614,7 +1290,7 @@ class ProjectDetailListAPIView(APIView):
 
 
 class ProjectDetailUpdateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -632,6 +1308,9 @@ class ProjectDetailUpdateAPIView(APIView):
         )
 
         with transaction.atomic():
+            project.contract_po_ref = (data.get('contract_po_ref') or '').strip()
+            project.save(update_fields=['contract_po_ref', 'updated_at'])
+
             for item_data in data['items']:
                 item = ProjectItem.objects.get(id=item_data['id'], project=project)
                 item.quantity = item_data['quantity']
@@ -644,7 +1323,7 @@ class ProjectDetailUpdateAPIView(APIView):
 
 
 class ProjectVariationAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -697,7 +1376,7 @@ class ProjectVariationAPIView(APIView):
 
 
 class TimeAllocationEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -750,8 +1429,8 @@ class TimeAllocationEntryAPIView(APIView):
 
                     TimeAllocationLine.objects.create(
                         entry=entry,
-                        project_number=resolved_package['project'].project_number,
-                        project_name=resolved_package['project'].project_name,
+                        project_number=resolved_package['project_number'],
+                        project_name=resolved_package['project_name'],
                         variation_number=resolved_package['variation_number'],
                         package=resolved_package['package'],
                         boq_sn='',
@@ -764,7 +1443,7 @@ class TimeAllocationEntryAPIView(APIView):
 
 
 class TimeAllocationListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -795,7 +1474,7 @@ class TimeAllocationListAPIView(APIView):
 
 
 class WorkCompletionEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -812,7 +1491,8 @@ class WorkCompletionEntryAPIView(APIView):
         )
 
         entry = WorkCompletionEntry.objects.create(
-            project=resolved_item['project'],
+            contract=resolved_item['contract'],
+            project=None,
             variation_number=resolved_item['variation_number'],
             date=data['date'],
             package=resolved_item['package'],
@@ -838,7 +1518,7 @@ class WorkCompletionEntryAPIView(APIView):
 
 
 class DeliveryEntryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
         company = get_company_from_request(request)
@@ -851,12 +1531,14 @@ class DeliveryEntryAPIView(APIView):
             project_number=data['project_number'],
             project_name=data['project_name'],
             variation_number=data.get('variation_number', ''),
+            package=data.get('package', ''),
             item_name=data['item_name'],
             boq_sn=data.get('boq_sn', ''),
         )
 
         entry = DeliveryEntry.objects.create(
-            project=resolved_item['project'],
+            contract=resolved_item['contract'],
+            project=None,
             variation_number=resolved_item['variation_number'],
             date=data['date'],
             package=data.get('package', '').strip() or resolved_item.get('package', ''),
@@ -875,7 +1557,7 @@ class DeliveryEntryAPIView(APIView):
 
 
 class ProductionStatusSummaryAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -918,8 +1600,8 @@ class ProductionStatusSummaryAPIView(APIView):
 
         return Response(
             {
-                'project_number': resolved_item['project'].project_number,
-                'project_name': resolved_item['project'].project_name,
+                'project_number': resolved_item['project_number'],
+                'project_name': resolved_item['project_name'],
                 'variation_number': resolved_item['variation_number'],
                 'package': resolved_item['package'],
                 'total_quantity': serialize_decimal(total_quantity),
@@ -930,7 +1612,7 @@ class ProductionStatusSummaryAPIView(APIView):
 
 
 class ProductionStatusBreakdownAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def get(self, request):
         company = get_company_from_request(request)
@@ -1004,8 +1686,8 @@ class ProductionStatusBreakdownAPIView(APIView):
             {
                 'stage': stage,
                 'basis': basis,
-                'project_number': resolved_item['project'].project_number,
-                'project_name': resolved_item['project'].project_name,
+                'project_number': resolved_item['project_number'],
+                'project_name': resolved_item['project_name'],
                 'variation_number': resolved_item['variation_number'],
                 'package': resolved_item['package'],
                 'total_quantity': serialize_decimal(resolved_item['total_quantity']),

@@ -2,15 +2,26 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
+import { formatDateDdMmmYy } from '@/lib/date-format'
+import {
+  compareVariationNumbers,
+  getVariationDisplayLabel,
+} from '@/lib/variation-number'
 
 type ProjectItem = {
   id: number
   package?: string
 }
 
+type VariationItem = {
+  id: number | string
+  package?: string
+}
+
 type VariationOption = {
-  id: number
+  id: number | string
   variation_number: string
+  items: VariationItem[]
 }
 
 type ProjectOption = {
@@ -59,7 +70,7 @@ export default function TimeAllocationViewClient() {
   useEffect(() => {
     async function loadProjectOptions() {
       try {
-        const projects = await fetchAPI('/production/project-details/options/')
+        const projects = await fetchAPI('/production/contract-options/')
         setProjectOptions(Array.isArray(projects) ? projects : [])
       } catch (err) {
         setError(
@@ -112,19 +123,30 @@ export default function TimeAllocationViewClient() {
   )
 
   const variationOptions = useMemo(
-    () => selectedProject?.variations || [],
+    () =>
+      (selectedProject?.variations || []).slice().sort((left, right) =>
+        compareVariationNumbers(left.variation_number, right.variation_number)
+      ),
     [selectedProject]
   )
 
   const packageOptions = useMemo(() => {
-    if (!selectedProject || filters.variationNumber) {
+    if (!selectedProject) {
       return []
     }
 
+    const items = filters.variationNumber
+      ? (
+          variationOptions.find(
+            (variation) => variation.variation_number === filters.variationNumber
+          )?.items || []
+        )
+      : selectedProject.items
+
     return Array.from(
-      new Set(selectedProject.items.map((item) => item.package || '').filter(Boolean))
+      new Set(items.map((item) => item.package || '').filter(Boolean))
     ).sort((left, right) => left.localeCompare(right))
-  }, [filters.variationNumber, selectedProject])
+  }, [filters.variationNumber, selectedProject, variationOptions])
 
   function handleProjectNumberChange(value: string) {
     const selected = projectOptions.find((project) => project.project_number === value)
@@ -152,9 +174,6 @@ export default function TimeAllocationViewClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Time Allocation View</h1>
-        <p className="mt-2 text-slate-700">
-          Filter saved time allocation rows by project and package.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -164,7 +183,9 @@ export default function TimeAllocationViewClient() {
             <select
               value={filters.projectNumber}
               onChange={(e) => handleProjectNumberChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                filters.projectNumber ? 'text-black' : 'text-neutral-400'
+              }`}
             >
               <option value="">Select project #</option>
               {projectOptions.map((project) => (
@@ -191,7 +212,7 @@ export default function TimeAllocationViewClient() {
               <option value="">Base Project</option>
               {variationOptions.map((variation) => (
                 <option key={variation.id} value={variation.variation_number}>
-                  {variation.variation_number}
+                  {getVariationDisplayLabel(variation.variation_number)}
                 </option>
               ))}
             </select>
@@ -201,7 +222,9 @@ export default function TimeAllocationViewClient() {
             <select
               value={filters.projectName}
               onChange={(e) => handleProjectNameChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                filters.projectName ? 'text-black' : 'text-neutral-400'
+              }`}
             >
               <option value="">Select project name</option>
               {projectOptions.map((project) => (
@@ -221,12 +244,12 @@ export default function TimeAllocationViewClient() {
                   package: e.target.value,
                 }))
               }
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-              disabled={!selectedProject || Boolean(filters.variationNumber)}
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                filters.package ? 'text-black' : 'text-neutral-400'
+              }`}
+              disabled={!selectedProject}
             >
-              <option value="">
-                {filters.variationNumber ? 'Variation allocation' : 'Select package'}
-              </option>
+              <option value="">Select package</option>
               {packageOptions.map((packageValue) => (
                 <option key={packageValue} value={packageValue}>
                   {packageValue}
@@ -276,7 +299,7 @@ export default function TimeAllocationViewClient() {
                     <BodyCell>{row.account_code || '-'}</BodyCell>
                     <BodyCell>{row.project_number || '-'}</BodyCell>
                     <BodyCell>{row.project_name || '-'}</BodyCell>
-                    <BodyCell>{row.variation_number || 'Base Project'}</BodyCell>
+                    <BodyCell>{getVariationDisplayLabel(row.variation_number)}</BodyCell>
                     <BodyCell>{row.package || '-'}</BodyCell>
                     <BodyCell>{formatPercentage(row.percentage)}</BodyCell>
                   </tr>
@@ -331,8 +354,7 @@ function BodyCell({
 }
 
 function formatDate(value: string) {
-  if (!value) return '-'
-  return new Date(`${value}T00:00:00`).toLocaleDateString('en-GB')
+  return formatDateDdMmmYy(value)
 }
 
 function formatPercentage(value: string | number) {

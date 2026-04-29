@@ -110,9 +110,6 @@ export default function AnnualLeaveForm() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Annual Leave</h1>
-        <p className="mt-2 text-slate-700">
-          Select employee and annual leave period.
-        </p>
       </div>
 
       <form
@@ -124,7 +121,9 @@ export default function AnnualLeaveForm() {
             <select
               value={form.employeeId}
               onChange={(e) => handleEmployeeIdChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.employeeId ? 'text-black' : 'text-neutral-500'
+              }`}
               required
             >
               <option value="">Select employee ID</option>
@@ -140,7 +139,9 @@ export default function AnnualLeaveForm() {
             <select
               value={form.employeeName}
               onChange={(e) => handleEmployeeNameChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.employeeName ? 'text-black' : 'text-neutral-500'
+              }`}
               required
             >
               <option value="">Select employee name</option>
@@ -158,7 +159,9 @@ export default function AnnualLeaveForm() {
               name="fromDate"
               value={form.fromDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.fromDate ? 'text-black' : 'text-neutral-500'
+              }`}
               required
             />
           </Field>
@@ -169,7 +172,9 @@ export default function AnnualLeaveForm() {
               name="toDate"
               value={form.toDate}
               onChange={handleChange}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                form.toDate ? 'text-black' : 'text-neutral-500'
+              }`}
               required
             />
           </Field>

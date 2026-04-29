@@ -399,9 +399,6 @@ export default function CashflowViewClient() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">Cashflow Report</h1>
-        <p className="mt-2 text-slate-700">
-          Generate the cash flow report by selecting a date range.
-        </p>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       </div>
 
@@ -417,7 +414,9 @@ export default function CashflowViewClient() {
                   fromDate: e.target.value,
                 }))
               }
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                filters.fromDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
 
@@ -431,7 +430,9 @@ export default function CashflowViewClient() {
                   toDate: e.target.value,
                 }))
               }
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+              className={`w-full rounded-lg border border-slate-300 bg-white px-3 py-2 ${
+                filters.toDate ? 'text-black' : 'text-neutral-400'
+              }`}
             />
           </Field>
         </div>
