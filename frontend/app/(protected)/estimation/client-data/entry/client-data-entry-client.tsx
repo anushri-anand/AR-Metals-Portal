@@ -1,8 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { fetchAPI } from '@/lib/api'
 import { createClientData, getClientData } from '@/lib/estimation-storage'
 import { findNextDocumentNumber } from '@/lib/document-numbering'
+import {
+  CLIENT_DATA_IMPORT_TEMPLATE_HEADERS,
+  downloadCsvTemplate,
+} from '@/lib/import-templates'
 
 const initialForm = {
   clientName: '',
@@ -22,27 +27,28 @@ export default function ClientDataEntryClient() {
   const [form, setForm] = useState(initialForm)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [importing, setImporting] = useState(false)
 
   useEffect(() => {
-    async function loadDefaultCustomerId() {
-      try {
-        const clients = await getClientData()
-        const nextCustomerId = findNextDocumentNumber(
-          clients.map((client) => client.customerId),
-          'C'
-        )
-
-        setForm((prev) => ({
-          ...prev,
-          customerId: prev.customerId || nextCustomerId,
-        }))
-      } catch {
-        // Keep the form usable even if the default ID cannot be preloaded.
-      }
-    }
-
-    loadDefaultCustomerId()
+    void loadDefaultCustomerId()
   }, [])
+
+  async function loadDefaultCustomerId() {
+    try {
+      const clients = await getClientData()
+      const nextCustomerId = findNextDocumentNumber(
+        clients.map((client) => client.customerId),
+        'C'
+      )
+
+      setForm((prev) => ({
+        ...prev,
+        customerId: prev.customerId || nextCustomerId,
+      }))
+    } catch {
+      // Keep the form usable even if the default ID cannot be preloaded.
+    }
+  }
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -98,6 +104,42 @@ export default function ClientDataEntryClient() {
       setMessage('Client data saved.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save client data.')
+    }
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+
+    if (!file) return
+
+    setImporting(true)
+    setMessage('')
+    setError('')
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const data = await fetchAPI('/estimation/client-data/import/', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const clients = await getClientData()
+      const nextCustomerId = findNextDocumentNumber(
+        clients.map((client) => client.customerId),
+        'C'
+      )
+
+      setForm({
+        ...initialForm,
+        customerId: nextCustomerId,
+      })
+      setMessage(`Imported ${Number(data?.count || 0)} client row(s).`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import client data.')
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -236,6 +278,28 @@ export default function ClientDataEntryClient() {
         </div>
 
         <div className="mt-8 flex flex-wrap items-center gap-4">
+          <label className="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+            {importing ? 'Importing...' : 'Import Excel/CSV'}
+            <input
+              type="file"
+              accept=".xlsx,.csv"
+              onChange={handleImportFile}
+              disabled={importing}
+              className="hidden"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              downloadCsvTemplate(
+                'client-data-import-template.csv',
+                CLIENT_DATA_IMPORT_TEMPLATE_HEADERS
+              )
+            }
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            Download Template
+          </button>
           <button
             type="submit"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"

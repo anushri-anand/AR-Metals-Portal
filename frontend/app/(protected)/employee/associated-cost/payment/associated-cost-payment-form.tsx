@@ -1,7 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany } from '@/lib/company'
 import { reserveNextDocumentNumbers } from '@/lib/document-numbering'
 
 type AssociatedCostEntryItem = {
@@ -206,9 +211,12 @@ export default function AssociatedCostPaymentForm() {
     setLoading(true)
 
     try {
-      const savedPayment = await fetchAPI('/employees/associated-cost/payment/entry/', {
-        method: 'POST',
-        body: JSON.stringify({
+      const approvalRequest = await submitApprovalRequest({
+        title: `Associated Cost Payment - ${form.serialNumber}`,
+        requestType: 'associated_cost_payment',
+        endpointPath: '/api/employees/associated-cost/payment/entry/',
+        company: getStoredCompany() || '',
+        payload: {
           serial_number: form.serialNumber,
           advance: form.advance || '0',
           recovery_advance: form.recoveryAdvance || '0',
@@ -223,42 +231,20 @@ export default function AssociatedCostPaymentForm() {
             gl_no: item.glNo,
             gl_date: item.glDate || null,
           })),
-        }),
+        },
       })
 
-      setPayments((prev) => {
-        const otherPayments = prev.filter(
-          (payment) => payment.serial_number !== savedPayment.serial_number
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Associated cost payment saved successfully.'
         )
-        return [savedPayment, ...otherPayments]
-      })
-      const selectedEntry = entries.find(
-        (entry) => entry.serial_number === savedPayment.serial_number
       )
-      setForm({
-        serialNumber: savedPayment.serial_number,
-        entryType: selectedEntry?.entry_type || savedPayment.entry_type || 'Labour',
-        supplierName: selectedEntry ? selectedEntry.supplier_name : '',
-        advance: savedPayment.advance || '',
-        recoveryAdvance: savedPayment.recovery_advance || '',
-        retention: savedPayment.retention || '',
-        releaseRetention: savedPayment.release_retention || '',
-        deliveryItems: buildDeliveryItems(
-          selectedEntry,
-          savedPayment,
-          existingInvoiceNumbers,
-          existingGlNumbers
-        ),
-      })
-      setExistingInvoiceNumbers((prev) => [
-        ...prev,
-        ...collectAssociatedCostInvoiceNumbers([savedPayment]),
-      ])
-      setExistingGlNumbers((prev) => [...prev, ...collectAssociatedCostGlNumbers([savedPayment])])
-      setMessage('Associated cost payment saved successfully.')
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to save associated cost payment.'
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit associated cost payment for approval.'
       )
     } finally {
       setLoading(false)
@@ -538,7 +524,7 @@ export default function AssociatedCostPaymentForm() {
             disabled={loading || !form.serialNumber}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
           >
-            {loading ? 'Saving...' : 'Save'}
+            {loading ? 'Submitting...' : 'Submit'}
           </button>
 
           {message ? <p className="text-sm text-green-700">{message}</p> : null}

@@ -22,14 +22,17 @@ from .views import (
     PcrReportSnapshotApproveAPIView,
     PurchaseOrderApproveAPIView,
     PurchaseOrderEntryAPIView,
+    PurchaseOrderRejectAPIView,
     PurchaseOrderListAPIView,
     VendorEntryAPIView,
     VendorDetailAPIView,
+    VendorImportAPIView,
     VendorListAPIView,
 )
 
 urlpatterns = [
     path('vendor-data/entry/', VendorEntryAPIView.as_view(), name='vendor-entry'),
+    path('vendor-data/import/', VendorImportAPIView.as_view(), name='vendor-import'),
     path('vendor-data/', VendorListAPIView.as_view(), name='vendor-list'),
     path('vendor-data/<int:pk>/', VendorDetailAPIView.as_view(), name='vendor-detail'),
 
@@ -39,6 +42,11 @@ urlpatterns = [
         'purchase-order/<int:pk>/approve/',
         PurchaseOrderApproveAPIView.as_view(),
         name='purchase-order-approve',
+    ),
+    path(
+        'purchase-order/<int:pk>/reject/',
+        PurchaseOrderRejectAPIView.as_view(),
+        name='purchase-order-reject',
     ),
 
     path('payment/entry/', PaymentEntryCreateAPIView.as_view(), name='payment-entry'),

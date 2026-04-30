@@ -1,6 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  isApprovalRequestApproved,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
 import {
   getAccountCodeOptions,
@@ -8,6 +13,7 @@ import {
   normalizeAccountCode,
   requiresManualAccountCode,
 } from '@/lib/account-codes'
+import { getStoredCompany } from '@/lib/company'
 
 type EntryType = 'Labour' | 'Others'
 type EmployeeCategory = 'Staff' | 'Labour' | ''
@@ -104,26 +110,26 @@ export default function AssociatedCostEntryForm() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [employees, entries, vendors] = await Promise.all([
-          fetchAPI('/employees/options/'),
-          fetchAPI('/employees/associated-cost/'),
-          fetchAPI('/procurement/vendor-data/'),
-        ])
-
-        setEmployeeOptions(Array.isArray(employees) ? employees : [])
-        setExistingEntries(Array.isArray(entries) ? entries : [])
-        setVendorOptions(Array.isArray(vendors) ? vendors : [])
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : 'Failed to load associated cost entry data.'
-        )
-      }
-    }
-
     void loadData()
   }, [])
+
+  async function loadData() {
+    try {
+      const [employees, entries, vendors] = await Promise.all([
+        fetchAPI('/employees/options/'),
+        fetchAPI('/employees/associated-cost/'),
+        fetchAPI('/procurement/vendor-data/'),
+      ])
+
+      setEmployeeOptions(Array.isArray(employees) ? employees : [])
+      setExistingEntries(Array.isArray(entries) ? entries : [])
+      setVendorOptions(Array.isArray(vendors) ? vendors : [])
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to load associated cost entry data.'
+      )
+    }
+  }
 
   const nextSerialPreview = useMemo(
     () => buildNextSerialPreview(existingEntries, form.entryType),
@@ -326,9 +332,12 @@ export default function AssociatedCostEntryForm() {
         }
       }
 
-      const savedEntry = await fetchAPI('/employees/associated-cost/entry/', {
-        method: 'POST',
-        body: JSON.stringify({
+      const approvalRequest = await submitApprovalRequest({
+        title: `Associated Cost Entry - ${nextSerialPreview}`,
+        requestType: 'associated_cost_entry',
+        endpointPath: '/api/employees/associated-cost/entry/',
+        company: getStoredCompany() || '',
+        payload: {
           entry_type: form.entryType,
           supplier_name: form.supplierName,
           date: form.date,
@@ -347,19 +356,26 @@ export default function AssociatedCostEntryForm() {
             start_date: item.startDate,
             end_date: item.endDate,
           })),
-        }),
+        },
       })
 
-      setExistingEntries((prev) =>
-        Array.isArray(savedEntry) ? prev : [savedEntry, ...prev]
-      )
-      setForm(createInitialForm(form.entryType))
+      if (isApprovalRequestApproved(approvalRequest)) {
+        setForm(createInitialForm(form.entryType))
+        await loadData()
+      }
+
       setMessage(
-        `Associated cost entry saved successfully. SN: ${savedEntry?.serial_number || ''}`
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          `Associated cost entry saved successfully. SN: ${nextSerialPreview}`,
+          `Submitted to admin for approval. Preview SN: ${nextSerialPreview}`
+        )
       )
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to save associated cost entry.'
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit associated cost entry for approval.'
       )
     } finally {
       setLoading(false)
@@ -672,7 +688,7 @@ export default function AssociatedCostEntryForm() {
             disabled={loading || form.items.length === 0}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
           >
-            {loading ? 'Saving...' : 'Save'}
+            {loading ? 'Submitting...' : 'Submit'}
           </button>
 
           {message ? <p className="text-sm text-green-700">{message}</p> : null}

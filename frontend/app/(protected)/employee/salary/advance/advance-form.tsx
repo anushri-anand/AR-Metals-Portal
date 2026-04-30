@@ -1,7 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany } from '@/lib/company'
 
 type EmployeeOption = {
   id: number
@@ -89,21 +94,30 @@ export default function AdvanceForm() {
     setLoading(true)
 
     try {
-      await fetchAPI('/employees/salary/advance/', {
-        method: 'POST',
-        body: JSON.stringify({
+      const approvalRequest = await submitApprovalRequest({
+        title: `Salary Advance - ${form.employeeId || form.employeeName}`,
+        requestType: 'employee_salary_advance',
+        endpointPath: '/api/employees/salary/advance/',
+        company: getStoredCompany() || '',
+        payload: {
           employee_id: form.employeeId,
           advance_date: form.advanceDate,
           amount: form.amount,
           remarks: form.remarks,
-        }),
+        },
       })
 
-      setForm(initialForm)
-      setMessage('Advance saved successfully.')
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Salary advance saved successfully.'
+        )
+      )
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to save advance.'
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit advance for approval.'
       )
     } finally {
       setLoading(false)
@@ -203,7 +217,7 @@ export default function AdvanceForm() {
             disabled={loading}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
           >
-            {loading ? 'Saving...' : 'Save'}
+            {loading ? 'Submitting...' : 'Submit'}
           </button>
 
           {message && <p className="text-sm text-green-700">{message}</p>}

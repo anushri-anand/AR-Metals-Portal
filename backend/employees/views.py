@@ -8,6 +8,7 @@ from django.db.models import Q, Sum
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from accounts.permissions import ApiRoleAccessPermission
+from accounts.approval_utils import ensure_admin_or_approval_execution
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -478,6 +479,10 @@ class EmployeeDetailEntryAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Personal detail entry must be approved by admin before it is saved.',
+        )
         company = get_company_from_request(request, required=False)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = EmployeeEntrySerializer(data=request.data)
@@ -524,6 +529,10 @@ class EmployeeDetailUpdateAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Personal detail updates must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request, required=False)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = EmployeeUpdateSerializer(data=request.data)
@@ -769,6 +778,10 @@ class AnnualLeaveCreateAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Annual leave entries must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request, required=False)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = AnnualLeaveCreateSerializer(data=request.data)
@@ -792,6 +805,10 @@ class SalaryAdvanceCreateAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Salary advance entries must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request, required=False)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = SalaryAdvanceCreateSerializer(data=request.data)
@@ -815,6 +832,10 @@ class AssociatedCostEntryAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Associated cost entries must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request, required=False)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = AssociatedCostEntryCreateSerializer(data=request.data)
@@ -878,6 +899,10 @@ class AssociatedCostPaymentEntryAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Associated cost payments must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request, required=False)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = AssociatedCostPaymentEntrySerializer(data=request.data)

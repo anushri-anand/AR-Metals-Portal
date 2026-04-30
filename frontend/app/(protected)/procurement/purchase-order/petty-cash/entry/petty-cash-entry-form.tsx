@@ -1,13 +1,17 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { fetchAPI } from '@/lib/api'
+import {
+  getApprovalSubmissionMessage,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import {
   getAccountCodeOptions,
   getDefaultAccountCode,
   normalizeAccountCode,
   requiresManualAccountCode,
 } from '@/lib/account-codes'
+import { getStoredCompany } from '@/lib/company'
 
 type PettyCashItem = {
   item: string
@@ -282,9 +286,12 @@ export default function PettyCashEntryForm() {
     try {
       validateFormState()
 
-      await fetchAPI('/procurement/petty-cash/entry/', {
-        method: 'POST',
-        body: JSON.stringify({
+      const approvalRequest = await submitApprovalRequest({
+        title: `Petty Cash Entry - ${form.voucherNumber.trim()}`,
+        requestType: 'petty_cash_entry',
+        endpointPath: '/api/procurement/petty-cash/entry/',
+        company: getStoredCompany() || '',
+        payload: {
           voucher_number: form.voucherNumber.trim(),
           items: normalizedItems.map((item) => ({
             item: item.item.trim(),
@@ -306,14 +313,21 @@ export default function PettyCashEntryForm() {
             balance: item.balance,
             forecast_date: item.forecastDate,
           })),
-        }),
+        },
       })
 
-      setForm(initialForm)
-      setItems([])
-      setMessage('Petty cash voucher saved successfully.')
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Petty cash entry saved successfully.'
+        )
+      )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save petty cash voucher.')
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit petty cash voucher for approval.'
+      )
     } finally {
       setSaving(false)
     }
@@ -599,7 +613,7 @@ export default function PettyCashEntryForm() {
             disabled={saving}
             className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saving ? 'Saving...' : 'Save Petty Cash'}
+            {saving ? 'Submitting...' : 'Submit Petty Cash'}
           </button>
           {message ? <p className="text-sm text-green-700">{message}</p> : null}
         </div>

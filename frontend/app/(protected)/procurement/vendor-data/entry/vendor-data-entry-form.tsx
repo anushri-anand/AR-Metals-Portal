@@ -1,7 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { fetchAPI } from '@/lib/api'
 import { findNextDocumentNumber } from '@/lib/document-numbering'
+import {
+  downloadCsvTemplate,
+  VENDOR_DATA_IMPORT_TEMPLATE_HEADERS,
+} from '@/lib/import-templates'
 import { createVendorData, getVendorData } from '@/lib/vendor-data'
 
 type FormState = {
@@ -39,27 +44,28 @@ export default function VendorDataEntryForm() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   useEffect(() => {
-    async function loadDefaultVendorId() {
-      try {
-        const vendors = await getVendorData()
-        const nextVendorId = findNextDocumentNumber(
-          vendors.map((vendor) => vendor.vendor_id),
-          'V'
-        )
-
-        setForm((prev) => ({
-          ...prev,
-          vendorId: prev.vendorId || nextVendorId,
-        }))
-      } catch {
-        // Keep the form usable even if the default ID cannot be preloaded.
-      }
-    }
-
-    loadDefaultVendorId()
+    void loadDefaultVendorId()
   }, [])
+
+  async function loadDefaultVendorId() {
+    try {
+      const vendors = await getVendorData()
+      const nextVendorId = findNextDocumentNumber(
+        vendors.map((vendor) => vendor.vendor_id),
+        'V'
+      )
+
+      setForm((prev) => ({
+        ...prev,
+        vendorId: prev.vendorId || nextVendorId,
+      }))
+    } catch {
+      // Keep the form usable even if the default ID cannot be preloaded.
+    }
+  }
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -119,6 +125,42 @@ export default function VendorDataEntryForm() {
       setError(err instanceof Error ? err.message : 'Failed to save vendor data.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+
+    if (!file) return
+
+    setImporting(true)
+    setMessage('')
+    setError('')
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const data = await fetchAPI('/procurement/vendor-data/import/', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const vendors = await getVendorData()
+      const nextVendorId = findNextDocumentNumber(
+        vendors.map((vendor) => vendor.vendor_id),
+        'V'
+      )
+
+      setForm({
+        ...initialForm,
+        vendorId: nextVendorId,
+      })
+      setMessage(`Imported ${Number(data?.count || 0)} vendor row(s).`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import vendor data.')
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -273,7 +315,29 @@ export default function VendorDataEntryForm() {
           </div>
         </div>
 
-        <div className="mt-8 flex items-center gap-4">
+        <div className="mt-8 flex flex-wrap items-center gap-4">
+          <label className="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+            {importing ? 'Importing...' : 'Import Excel/CSV'}
+            <input
+              type="file"
+              accept=".xlsx,.csv"
+              onChange={handleImportFile}
+              disabled={importing}
+              className="hidden"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              downloadCsvTemplate(
+                'vendor-data-import-template.csv',
+                VENDOR_DATA_IMPORT_TEMPLATE_HEADERS
+              )
+            }
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            Download Template
+          </button>
           <button
             type="submit"
             disabled={loading}

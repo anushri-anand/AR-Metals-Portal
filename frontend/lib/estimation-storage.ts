@@ -202,7 +202,7 @@ export type CostingRevisionSnapshot = {
   projectName: string
   revisionNumber: string
   variationNumber?: string
-  status: 'submitted' | 'approved'
+  status: 'submitted' | 'approved' | 'rejected'
   submittedBy: string
   approvedBy: string
   submittedAt: string
@@ -847,8 +847,16 @@ function normalizeCostingRevisionSnapshot(
     variationNumber: normalizeVariationNumber(
       String(item.variation_number || item.variationNumber || '')
     ),
-    status:
-      String(item.status || 'submitted') === 'approved' ? 'approved' : 'submitted',
+    status: (() => {
+      const normalizedStatus = String(item.status || 'submitted')
+      if (normalizedStatus === 'approved') {
+        return 'approved'
+      }
+      if (normalizedStatus === 'rejected') {
+        return 'rejected'
+      }
+      return 'submitted'
+    })(),
     submittedBy: String(item.submitted_by || item.submittedBy || ''),
     approvedBy: String(item.approved_by || item.approvedBy || ''),
     submittedAt: String(item.submitted_at || item.submittedAt || ''),

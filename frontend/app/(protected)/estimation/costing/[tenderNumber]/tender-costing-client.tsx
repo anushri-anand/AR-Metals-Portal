@@ -29,6 +29,7 @@ import {
   getTenderCosting,
   labourStageNames,
   saveTenderCosting,
+  updateBoqItem,
 } from '@/lib/estimation-storage'
 
 type SimpleSectionName = 'machining' | 'coating' | 'subcontract'
@@ -297,12 +298,31 @@ export default function TenderCostingClient({
     })
   }
 
+  function updateBoqPercentField(
+    field: 'freightCustomDutyPercent' | 'prelimsPercent' | 'markup',
+    value: string
+  ) {
+    setBoqItem((prev) =>
+      prev
+        ? {
+            ...prev,
+            [field]: value === '' ? 0 : Number(value || 0),
+          }
+        : prev
+    )
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
     if (!boqItem || !costing) return
 
     try {
+      await updateBoqItem(boqItem.id, {
+        freightCustomDutyPercent: boqItem.freightCustomDutyPercent,
+        prelimsPercent: boqItem.prelimsPercent,
+        markup: boqItem.markup,
+      })
       await saveTenderCosting({
         ...costing,
         boqItemId: boqItem.id,
@@ -328,7 +348,24 @@ export default function TenderCostingClient({
         return
       }
 
+      const sourceBoqItem =
+        boqItems.find((item) => String(item.id) === String(copySourceId)) || null
+
       setCosting(cloneCostingForCurrentBoq(sourceCosting, costing, boqItem))
+      if (sourceBoqItem && isVariationBoq) {
+        setBoqItem((prev) =>
+          prev
+            ? {
+                ...prev,
+                freightCustomDutyPercent: Number(
+                  sourceBoqItem.freightCustomDutyPercent || 0
+                ),
+                prelimsPercent: Number(sourceBoqItem.prelimsPercent || 0),
+                markup: Number(sourceBoqItem.markup || 0),
+              }
+            : prev
+        )
+      }
       setCopyMessage('Copied costing details. Review and save this SN when ready.')
     } catch (err) {
       setCopyMessage(
@@ -432,7 +469,37 @@ export default function TenderCostingClient({
             )}
 
             {isVariationBoq ? (
-              <div className="mt-4 max-w-xs">
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <Field label="Freight & Custom Duty (%)">
+                  <NumberInput
+                    value={boqItem.freightCustomDutyPercent || ''}
+                    onChange={(nextValue) =>
+                      updateBoqPercentField(
+                        'freightCustomDutyPercent',
+                        nextValue
+                      )
+                    }
+                    placeholder="Freight %"
+                  />
+                </Field>
+                <Field label="Prelims (%)">
+                  <NumberInput
+                    value={boqItem.prelimsPercent || ''}
+                    onChange={(nextValue) =>
+                      updateBoqPercentField('prelimsPercent', nextValue)
+                    }
+                    placeholder="Prelims %"
+                  />
+                </Field>
+                <Field label="Markup">
+                  <NumberInput
+                    value={boqItem.markup || ''}
+                    onChange={(nextValue) =>
+                      updateBoqPercentField('markup', nextValue)
+                    }
+                    placeholder="Markup"
+                  />
+                </Field>
                 <Field label="Pro-rata Factor">
                   <NumberInput
                     value={costing.proRataFactor ?? 1}

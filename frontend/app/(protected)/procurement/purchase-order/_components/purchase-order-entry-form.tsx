@@ -511,7 +511,11 @@ export default function PurchaseOrderEntryForm({
         poNumber: findNextDocumentNumber(nextPoNumbers, 'PO'),
         poRevNumber: 'R0',
       }))
-      setMessage('Purchase order submitted to admin for approval.')
+      setMessage(
+        String(savedOrder.status || '').toLowerCase() === 'approved'
+          ? 'Purchase order saved directly by admin.'
+          : 'Purchase order submitted to admin for approval.'
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit purchase order.')
     } finally {

@@ -122,7 +122,7 @@ const exportableRouteMatchers: Array<{
     fileName: 'BOMAL',
   },
   {
-    matches: (pathname) => pathname === '/contract/variation-log',
+    matches: (pathname) => pathname === '/contract/variation-log/view',
     title: 'Variation Log',
     fileName: 'Variation-Log',
   },

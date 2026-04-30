@@ -1,7 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany } from '@/lib/company'
 import { reserveNextDocumentNumbers } from '@/lib/document-numbering'
 
 type PurchaseOrderItem = {
@@ -258,9 +263,12 @@ export default function PaymentEntryForm() {
     setSaving(true)
 
     try {
-      await fetchAPI('/procurement/payment/entry/', {
-        method: 'POST',
-        body: JSON.stringify({
+      const approvalRequest = await submitApprovalRequest({
+        title: `Procurement Payment Entry - ${form.poNumber}`,
+        requestType: 'procurement_payment_entry',
+        endpointPath: '/api/procurement/payment/entry/',
+        company: getStoredCompany() || '',
+        payload: {
           po_number: form.poNumber,
           advance: form.advance || '0',
           recovery_advance: form.recoveryAdvance || '0',
@@ -283,14 +291,20 @@ export default function PaymentEntryForm() {
             gl_no: phase.glNo,
             gl_date: phase.glDate || null,
           })),
-        }),
+        },
       })
 
-      setForm(initialForm)
-      setMessage('Payment entry saved successfully.')
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Payment entry saved successfully.'
+        )
+      )
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to save payment entry.'
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit payment entry for approval.'
       )
     } finally {
       setSaving(false)
@@ -654,7 +668,7 @@ export default function PaymentEntryForm() {
             disabled={saving}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"
           >
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? 'Submitting...' : 'Submit'}
           </button>
 
           {message && <p className="text-sm text-green-700">{message}</p>}

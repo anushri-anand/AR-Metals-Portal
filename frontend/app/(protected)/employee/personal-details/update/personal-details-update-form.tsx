@@ -1,7 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  isApprovalRequestApproved,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany } from '@/lib/company'
 
 type EmployeeOption = {
   id: number
@@ -181,30 +187,45 @@ export default function PersonalDetailsUpdateForm() {
     setError('')
 
     try {
-      await fetchAPI('/employees/personal-details/update/', {
-        method: 'POST',
-        body: JSON.stringify({
-          employee_id: selectedEmployeeId,
-          designation: form.designation,
-          category: form.category,
-          visa_start_date: form.visaStartDate || null,
-          visa_end_date: form.visaEndDate || null,
-          passport_expiry_date: form.passportExpiryDate || null,
-          basic_salary: form.basicSalary,
-          allowances: form.allowances,
-          salary_start_date: form.salaryStartDate || null,
-          employment_end_date: form.employmentEndDate || null,
-        }),
+      const payload = {
+        employee_id: selectedEmployeeId,
+        designation: form.designation,
+        category: form.category,
+        visa_start_date: form.visaStartDate || null,
+        visa_end_date: form.visaEndDate || null,
+        passport_expiry_date: form.passportExpiryDate || null,
+        basic_salary: form.basicSalary,
+        allowances: form.allowances,
+        salary_start_date: form.salaryStartDate || null,
+        employment_end_date: form.employmentEndDate || null,
+      }
+
+      const approvalRequest = await submitApprovalRequest({
+        title: `Personal Details Update - ${selectedEmployeeId}`,
+        requestType: 'employee_personal_detail_update',
+        endpointPath: '/api/employees/personal-details/update/',
+        company: currentVisaUnder || getStoredCompany() || '',
+        payload,
       })
 
-      setMessage('Employee details updated successfully.')
-      setForm((prev) => ({
-        ...prev,
-        salaryStartDate: '',
-      }))
+      if (isApprovalRequestApproved(approvalRequest) && selectedEmployeeId) {
+        const data = await fetchAPI(
+          `/employees/personal-details/history/?employee_id=${selectedEmployeeId}`
+        )
+        setHistoryRows(data)
+      }
+
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Personal details updated successfully.'
+        )
+      )
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to update employee details.'
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit employee details update for approval.'
       )
     }
   }
@@ -398,7 +419,7 @@ export default function PersonalDetailsUpdateForm() {
                 type="submit"
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"
               >
-                Save Update
+                Submit Update
               </button>
 
               {message && <p className="text-sm text-green-700">{message}</p>}

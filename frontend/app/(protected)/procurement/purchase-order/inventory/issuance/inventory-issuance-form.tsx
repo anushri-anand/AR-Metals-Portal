@@ -1,7 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  isApprovalRequestApproved,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany } from '@/lib/company'
 import ProjectSelectFields from '@/components/project-select-fields'
 
 type PurchaseOrderItem = {
@@ -45,29 +51,29 @@ export default function InventoryIssuanceForm() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    async function loadData() {
-      setLoading(true)
-      setError('')
-
-      try {
-        const [purchaseOrderData, issuanceData] = await Promise.all([
-          fetchAPI('/procurement/purchase-order/?order_type=inventory&status=approved'),
-          fetchAPI('/procurement/inventory-issuance/'),
-        ])
-
-        setPurchaseOrders(Array.isArray(purchaseOrderData) ? purchaseOrderData : [])
-        setIssuances(Array.isArray(issuanceData) ? issuanceData : [])
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : 'Failed to load inventory issuance data.'
-        )
-      } finally {
-        setLoading(false)
-      }
-    }
-
     void loadData()
   }, [])
+
+  async function loadData() {
+    setLoading(true)
+    setError('')
+
+    try {
+      const [purchaseOrderData, issuanceData] = await Promise.all([
+        fetchAPI('/procurement/purchase-order/?order_type=inventory&status=approved'),
+        fetchAPI('/procurement/inventory-issuance/'),
+      ])
+
+      setPurchaseOrders(Array.isArray(purchaseOrderData) ? purchaseOrderData : [])
+      setIssuances(Array.isArray(issuanceData) ? issuanceData : [])
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to load inventory issuance data.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const supplierOptions = useMemo(
     () => Array.from(new Set(purchaseOrders.map((po) => po.supplier_name))).sort(),
@@ -170,23 +176,39 @@ export default function InventoryIssuanceForm() {
         throw new Error('Quantity to Issue cannot exceed the remaining quantity.')
       }
 
-      const savedIssuance = await fetchAPI('/procurement/inventory-issuance/entry/', {
-        method: 'POST',
-        body: JSON.stringify({
+      const approvalRequest = await submitApprovalRequest({
+        title: `Inventory Issuance - ${poNumber}`,
+        requestType: 'inventory_issuance_entry',
+        endpointPath: '/api/procurement/inventory-issuance/entry/',
+        company: getStoredCompany() || '',
+        payload: {
           po_number: poNumber,
           line_number: Number(lineNumber),
           issuance_date: issuanceDate,
           project_name: projectName.trim(),
           project_number: projectNumber.trim(),
           quantity_issued: quantityToIssue,
-        }),
+        },
       })
 
-      setIssuances((prev) => [...prev, savedIssuance as InventoryIssuanceRecord])
       resetEntryFields()
-      setMessage('Inventory issuance saved successfully.')
+
+      if (isApprovalRequestApproved(approvalRequest)) {
+        await loadData()
+      }
+
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Inventory issuance saved successfully.'
+        )
+      )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save inventory issuance.')
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit inventory issuance for approval.'
+      )
     } finally {
       setSaving(false)
     }
@@ -330,7 +352,7 @@ export default function InventoryIssuanceForm() {
             disabled={saving}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saving ? 'Saving...' : 'Save Issuance'}
+            {saving ? 'Submitting...' : 'Submit Issuance'}
           </button>
           {message ? <p className="text-sm text-green-700">{message}</p> : null}
         </div>

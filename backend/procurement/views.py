@@ -2,14 +2,26 @@ from django.utils import timezone
 from django.db import transaction
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from accounts.permissions import ApiRoleAccessPermission
+from accounts.approval_utils import (
+    ensure_admin_or_approval_execution,
+    ensure_admin_user,
+    upsert_pending_approval_request,
+)
+from accounts.roles import ROLE_ADMIN, get_user_role, is_manager_or_admin
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.roles import is_manager_or_admin
 from shared.company import get_company_from_request
 from shared.period_closing import ensure_request_dates_in_open_period
+from shared.tabular_import import (
+    get_header_row_and_data_rows,
+    get_row_value,
+    normalize_header,
+    parse_uploaded_table,
+)
 
 from .models import (
     AssetDeposit,
@@ -106,6 +118,120 @@ def serialize_line_items_for_storage(line_items):
     return serialized_items
 
 
+def extract_error_message(value):
+    if value in (None, '', []):
+        return ''
+
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, list):
+        return ' '.join(filter(None, [extract_error_message(item) for item in value]))
+
+    if isinstance(value, dict):
+        for nested_value in value.values():
+            nested_message = extract_error_message(nested_value)
+            if nested_message:
+                return nested_message
+
+    return str(value)
+
+
+def get_import_column_map(headers, aliases, required_fields):
+    column_map = {}
+
+    for field, field_aliases in aliases.items():
+        for index, header in enumerate(headers):
+            if header in field_aliases:
+                column_map[field] = index
+                break
+
+    missing_fields = [field for field in required_fields if field not in column_map]
+    if missing_fields:
+        raise ValueError(
+            'Excel must include these columns: '
+            + ', '.join(required_fields)
+            + '.'
+        )
+
+    return column_map
+
+
+def rows_to_vendor_payloads(sheet_rows):
+    if not sheet_rows:
+        raise ValueError('The uploaded file is empty.')
+
+    header_row, data_rows = get_header_row_and_data_rows(sheet_rows)
+
+    if not header_row:
+        raise ValueError('The uploaded file is empty.')
+
+    headers = [normalize_header(value) for value in header_row]
+    column_map = get_import_column_map(
+        headers,
+        {
+            'supplier_name': {'suppliername', 'nameofsupplier'},
+            'vendor_id': {'vendorid'},
+            'trn_no': {'trnno', 'trnnumber'},
+            'po_box': {'pobox'},
+            'country': {'country'},
+            'city': {'city'},
+            'contact_person_name': {'contactpersonname', 'nameofcontactperson', 'contactperson'},
+            'mobile_number': {'mobilenumber', 'mobile', 'mobile#'},
+            'email': {'email'},
+            'company_telephone': {'companytelephone', 'companytel', 'companytelnumber'},
+            'product_details': {'productdetails'},
+            'review': {'review', 'remarks', 'remark'},
+        },
+        ['supplier_name', 'country', 'city', 'contact_person_name'],
+    )
+
+    payloads = []
+
+    for row in data_rows:
+        if not any(str(value).strip() for value in row):
+            continue
+
+        payloads.append(
+            {
+                'supplier_name': get_row_value(row, column_map['supplier_name']),
+                'vendor_id': get_row_value(row, column_map.get('vendor_id')),
+                'trn_no': get_row_value(row, column_map.get('trn_no')),
+                'po_box': get_row_value(row, column_map.get('po_box')),
+                'country': get_row_value(row, column_map['country']),
+                'city': get_row_value(row, column_map['city']),
+                'contact_person_name': get_row_value(row, column_map['contact_person_name']),
+                'mobile_number': get_row_value(row, column_map.get('mobile_number')),
+                'email': get_row_value(row, column_map.get('email')),
+                'company_telephone': get_row_value(row, column_map.get('company_telephone')),
+                'product_details': get_row_value(row, column_map.get('product_details')),
+                'review': get_row_value(row, column_map.get('review')),
+                'contacts': (
+                    [
+                        {
+                            'name': get_row_value(row, column_map['contact_person_name']),
+                            'mobile_number': get_row_value(row, column_map.get('mobile_number')),
+                            'email': get_row_value(row, column_map.get('email')),
+                        }
+                    ]
+                    if any(
+                        [
+                            get_row_value(row, column_map['contact_person_name']),
+                            get_row_value(row, column_map.get('mobile_number')),
+                            get_row_value(row, column_map.get('email')),
+                        ]
+                    )
+                    else []
+                ),
+            }
+        )
+
+    if not payloads:
+        raise ValueError('No vendor rows were found in the uploaded file.')
+
+    return payloads
+
+
 class VendorEntryAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
@@ -118,6 +244,44 @@ class VendorEntryAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         vendor = serializer.save()
         return Response(VendorSerializer(vendor).data, status=status.HTTP_201_CREATED)
+
+
+class VendorImportAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        company = get_company_from_request(request)
+        uploaded_file = request.FILES.get('file')
+
+        if not uploaded_file:
+            return Response(
+                {'detail': 'Please upload an Excel or CSV file.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            payloads = rows_to_vendor_payloads(parse_uploaded_table(uploaded_file))
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        imported = []
+
+        with transaction.atomic():
+            for index, payload in enumerate(payloads, start=1):
+                serializer = VendorSerializer(
+                    data=payload,
+                    context={'request': request, 'company': company},
+                )
+                try:
+                    serializer.is_valid(raise_exception=True)
+                    imported.append(VendorSerializer(serializer.save()).data)
+                except ValidationError as exc:
+                    raise ValidationError(
+                        {'detail': f'Row {index}: {extract_error_message(exc.detail)}'}
+                    )
+
+        return Response({'count': len(imported), 'rows': imported}, status=status.HTTP_201_CREATED)
 
 
 class VendorListAPIView(APIView):
@@ -190,15 +354,25 @@ class PurchaseOrderEntryAPIView(APIView):
 
         po_amount_aed = po_amount
         po_amount_inc_vat_aed = po_amount_aed + vat_aed
+        is_admin_direct_submit = (
+            po_status == PurchaseOrder.STATUS_SUBMITTED
+            and get_user_role(request.user) == ROLE_ADMIN
+        )
+        persisted_status = (
+            PurchaseOrder.STATUS_APPROVED
+            if is_admin_direct_submit
+            else po_status
+        )
         submitted_at = (
             timezone.now()
             if po_status == PurchaseOrder.STATUS_SUBMITTED
             else None
         )
+        approved_at = submitted_at if is_admin_direct_submit else None
 
         purchase_order_defaults = {
             'order_type': order_type,
-            'status': po_status,
+            'status': persisted_status,
             'project_number': data.get('project_number', ''),
             'project_name': data.get('project_name', ''),
             'cost_code': data['cost_code'],
@@ -220,25 +394,56 @@ class PurchaseOrderEntryAPIView(APIView):
 
         if po_status == PurchaseOrder.STATUS_SUBMITTED:
             purchase_order_defaults['submitted_at'] = submitted_at
-            purchase_order_defaults['approved_at'] = None
+            purchase_order_defaults['approved_at'] = approved_at
 
-        if existing_purchase_order:
-            if existing_purchase_order.status == PurchaseOrder.STATUS_APPROVED:
-                raise PermissionDenied('Approved PO cannot be modified.')
+        with transaction.atomic():
+            if existing_purchase_order:
+                if existing_purchase_order.status == PurchaseOrder.STATUS_APPROVED:
+                    raise PermissionDenied('Approved PO cannot be modified.')
 
-            for field, value in purchase_order_defaults.items():
-                setattr(existing_purchase_order, field, value)
+                for field, value in purchase_order_defaults.items():
+                    setattr(existing_purchase_order, field, value)
 
-            existing_purchase_order.save()
-            purchase_order = existing_purchase_order
-            response_status = status.HTTP_200_OK
-        else:
-            purchase_order = PurchaseOrder.objects.create(
-                company=company,
-                po_number=data['po_number'],
-                **purchase_order_defaults,
-            )
-            response_status = status.HTTP_201_CREATED
+                existing_purchase_order.save()
+                purchase_order = existing_purchase_order
+                response_status = status.HTTP_200_OK
+            else:
+                purchase_order = PurchaseOrder.objects.create(
+                    company=company,
+                    po_number=data['po_number'],
+                    **purchase_order_defaults,
+                )
+                response_status = status.HTTP_201_CREATED
+
+            if po_status == PurchaseOrder.STATUS_SUBMITTED and not is_admin_direct_submit:
+                upsert_pending_approval_request(
+                    title=f'Purchase Order - {purchase_order.po_number}',
+                    request_type='purchase_order_submission',
+                    endpoint_path=f'/api/procurement/purchase-order/{purchase_order.pk}/approve/',
+                    submitted_by=request.user,
+                    company=company,
+                    payload={
+                        'po_number': purchase_order.po_number,
+                        'order_type': purchase_order.order_type,
+                        'project_number': purchase_order.project_number,
+                        'project_name': purchase_order.project_name,
+                        'supplier_name': supplier.supplier_name,
+                        'cost_code': purchase_order.cost_code,
+                        'po_date_original': (
+                            purchase_order.po_date_original.isoformat()
+                            if purchase_order.po_date_original
+                            else ''
+                        ),
+                        'mode_of_payment': purchase_order.mode_of_payment,
+                        'remarks': purchase_order.remarks,
+                        'po_amount_aed': str(purchase_order.po_amount_aed),
+                        'vat_aed': str(purchase_order.vat_aed),
+                        'po_amount_inc_vat_aed': str(purchase_order.po_amount_inc_vat_aed),
+                        'line_items': purchase_order.line_items,
+                    },
+                    reject_endpoint_path=f'/api/procurement/purchase-order/{purchase_order.pk}/reject/',
+                    reject_payload={'po_number': purchase_order.po_number},
+                )
 
         response_serializer = PurchaseOrderSerializer(
             purchase_order,
@@ -278,8 +483,7 @@ class PurchaseOrderApproveAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request, pk):
-        if not is_manager_or_admin(getattr(request.user, 'role', '')):
-            raise PermissionDenied('Only manager or admin can approve purchase orders.')
+        ensure_admin_user(request.user, 'Only admin can approve purchase orders.')
 
         company = get_company_from_request(request)
         purchase_order = PurchaseOrder.objects.get(pk=pk, company=company)
@@ -301,10 +505,38 @@ class PurchaseOrderApproveAPIView(APIView):
         )
 
 
+class PurchaseOrderRejectAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+
+    def post(self, request, pk):
+        ensure_admin_user(request.user, 'Only admin can reject purchase orders.')
+
+        company = get_company_from_request(request)
+        purchase_order = PurchaseOrder.objects.get(pk=pk, company=company)
+
+        if purchase_order.status != PurchaseOrder.STATUS_SUBMITTED:
+            raise ValidationError({'detail': 'Only submitted purchase orders can be rejected.'})
+
+        purchase_order.status = PurchaseOrder.STATUS_REJECTED
+        purchase_order.approved_at = None
+        purchase_order.save(update_fields=['status', 'approved_at'])
+
+        return Response(
+            PurchaseOrderSerializer(
+                purchase_order,
+                context={'request': request, 'company': company},
+            ).data
+        )
+
+
 class PaymentEntryCreateAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Procurement payment entries must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = PaymentEntryCreateSerializer(
@@ -396,6 +628,10 @@ class PaymentEntryUpdateAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Procurement payment updates must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = PaymentEntryUpdateSerializer(
@@ -445,6 +681,10 @@ class InventoryIssuanceEntryAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Inventory issuance entries must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = InventoryIssuanceEntrySerializer(
@@ -554,6 +794,10 @@ class PettyCashVoucherEntryAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Petty cash entries must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = PettyCashVoucherEntrySerializer(
@@ -622,6 +866,10 @@ class AssetDepositEntryAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Asset deposits must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = AssetDepositEntrySerializer(

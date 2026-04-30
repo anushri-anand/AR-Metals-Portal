@@ -4,13 +4,15 @@ import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
-import { hasRoleAccess } from '@/lib/access'
+import {
+  BOQ_IMPORT_TEMPLATE_HEADERS,
+  downloadCsvTemplate,
+} from '@/lib/import-templates'
 import {
   compareVariationNumbers,
   normalizeVariationNumber,
 } from '@/lib/variation-number'
 import {
-  approveCostingRevisionSnapshot,
   BoqItem,
   ContractVariationLog,
   CostingRevisionSnapshot,
@@ -151,11 +153,7 @@ export default function CostingClient({
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
-  const [role, setRole] = useState('')
   const [submittingSnapshot, setSubmittingSnapshot] = useState(false)
-  const [approvingSnapshotId, setApprovingSnapshotId] = useState<number | null>(
-    null
-  )
   const initialProjectNumber = searchParams.get('projectNumber') || ''
   const initialProjectName = searchParams.get('projectName') || ''
   const initialTenderNumber = searchParams.get('tenderNumber') || ''
@@ -173,7 +171,6 @@ export default function CostingClient({
           savedVariationLogs,
           savedProjectOptions,
           savedSnapshots,
-          me,
         ] = await Promise.all([
           getBoqItems(),
           getMasterListItems(),
@@ -182,7 +179,6 @@ export default function CostingClient({
           getContractVariationLogs(),
           fetchAPI('/production/project-details/options/'),
           getCostingRevisionSnapshots(),
-          fetchAPI('/accounts/me/'),
         ])
         const normalizedProjectOptions = Array.isArray(savedProjectOptions)
           ? (savedProjectOptions as ProjectOption[])
@@ -314,7 +310,6 @@ export default function CostingClient({
             ? firstRows
             : applyCommonValuesToRows(firstRows, firstCommonValues)
         )
-        setRole(typeof me?.role === 'string' ? me.role : '')
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'Failed to load costing data.'
@@ -772,7 +767,9 @@ export default function CostingClient({
 
       setSnapshots((prev) => upsertCostingSnapshot(prev, savedSnapshot))
       setMessage(
-        `Costing ${getRevisionLabel(revisionNumber.trim())} submitted for approval.`
+        savedSnapshot.status === 'approved'
+          ? `Costing ${getRevisionLabel(revisionNumber.trim())} saved directly by admin.`
+          : `Costing ${getRevisionLabel(revisionNumber.trim())} submitted for approval.`
       )
     } catch (err) {
       setError(
@@ -780,74 +777,6 @@ export default function CostingClient({
       )
     } finally {
       setSubmittingSnapshot(false)
-    }
-  }
-
-  async function handleApproveRevision(snapshotId: number) {
-    setApprovingSnapshotId(snapshotId)
-    setError('')
-    setMessage('')
-
-    try {
-      const approvedSnapshot = await approveCostingRevisionSnapshot(snapshotId)
-      const nextSnapshots = upsertCostingSnapshot(snapshots, approvedSnapshot)
-
-      setSnapshots(nextSnapshots)
-      if (
-        approvedSnapshot.tenderNumber === selectedTenderNumber &&
-        approvedSnapshot.revisionNumber === revisionNumber.trim() &&
-        (approvedSnapshot.variationNumber || '') ===
-          (mode === 'variation' ? selectedVariationNumber : '')
-      ) {
-        const nextRevisionNumber = getDefaultRevisionNumber(
-          allRows,
-          nextSnapshots,
-          selectedTenderNumber,
-          mode === 'variation' ? selectedVariationNumber : ''
-        )
-        const nextRevisionDate = getRevisionDate(
-          allRows,
-          selectedTenderNumber,
-          nextRevisionNumber,
-          mode === 'variation' ? selectedVariationNumber : ''
-        )
-        const nextRows = selectedTenderNumber
-          ? getRowsForRevisionSelection(
-              allRows,
-              selectedTenderNumber,
-              nextRevisionNumber,
-              mode === 'variation' ? selectedVariationNumber : ''
-            )
-          : [createEmptyRow()]
-        const nextCommonValues = getCommonValuesForRows(nextRows)
-
-        setRevisionNumber(nextRevisionNumber)
-        setRevisionDate(nextRevisionDate)
-        setRows(
-          mode === 'variation'
-            ? applyVariationDefaultsToRows(
-                nextRows,
-                allRows,
-                selectedTenderNumber,
-                selectedVariationNumber
-              )
-            : applyCommonValuesToRows(nextRows, nextCommonValues)
-        )
-        setCommonValues(
-          mode === 'variation'
-            ? createEmptyCommonValues()
-            : nextCommonValues
-        )
-      }
-      setMessage(
-        `Costing ${getRevisionLabel(approvedSnapshot.revisionNumber)} approved.`
-      )
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to approve costing revision.'
-      )
-    } finally {
-      setApprovingSnapshotId(null)
     }
   }
 
@@ -1222,20 +1151,6 @@ export default function CostingClient({
               >
                 {submittingSnapshot ? 'Submitting...' : 'Submit'}
               </button>
-              {hasRoleAccess(role, ['manager', 'admin']) &&
-              matchingSnapshot &&
-              matchingSnapshot.status !== 'approved' ? (
-                <button
-                  type="button"
-                  onClick={() => handleApproveRevision(matchingSnapshot.id)}
-                  disabled={approvingSnapshotId === matchingSnapshot.id}
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60"
-                >
-                  {approvingSnapshotId === matchingSnapshot.id
-                    ? 'Approving...'
-                    : 'Approve'}
-                </button>
-              ) : null}
             </div>
             {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
           </Field>
@@ -1559,6 +1474,20 @@ export default function CostingClient({
               className="hidden"
             />
           </label>
+          <button
+            type="button"
+            onClick={() =>
+              downloadCsvTemplate(
+                mode === 'variation'
+                  ? 'variation-boq-import-template.csv'
+                  : 'boq-import-template.csv',
+                BOQ_IMPORT_TEMPLATE_HEADERS
+              )
+            }
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            Download Template
+          </button>
           <button
             type="button"
             onClick={handleAddRow}

@@ -14,16 +14,28 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from accounts.permissions import ApiRoleAccessPermission
+from accounts.approval_utils import (
+    ensure_admin_or_approval_execution,
+    ensure_admin_user,
+    upsert_pending_approval_request,
+)
+from accounts.roles import ROLE_ADMIN, get_user_role
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.roles import is_manager_or_admin
 from production.models import ProjectDetail
 from shared.company import get_company_from_request
 from shared.period_closing import ensure_request_dates_in_open_period
+from shared.tabular_import import (
+    get_header_row_and_data_rows,
+    get_row_value,
+    normalize_header,
+    parse_uploaded_table,
+)
 
 from .models import (
     BoqItem,
+    ClientContact,
     ClientData,
     CostingRevisionSnapshot,
     ContractPaymentLog,
@@ -417,6 +429,44 @@ class ClientDataAPIView(APIView):
         )
 
 
+class ClientDataImportAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        company = get_company_from_request(request)
+        uploaded_file = request.FILES.get('file')
+
+        if not uploaded_file:
+            return Response(
+                {'detail': 'Please upload an Excel or CSV file.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            payloads = rows_to_client_data_payloads(parse_uploaded_table(uploaded_file))
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        imported = []
+
+        with transaction.atomic():
+            for index, payload in enumerate(payloads, start=1):
+                serializer = ClientDataSerializer(
+                    data=payload,
+                    context={'request': request, 'company': company},
+                )
+                try:
+                    serializer.is_valid(raise_exception=True)
+                    imported.append(ClientDataSerializer(serializer.save()).data)
+                except ValidationError as exc:
+                    raise ValidationError(
+                        {'detail': f'Row {index}: {extract_error_message(exc.detail)}'}
+                    )
+
+        return Response({'count': len(imported), 'rows': imported}, status=status.HTTP_201_CREATED)
+
+
 class ClientDataDetailAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
@@ -457,6 +507,47 @@ class TenderLogAPIView(APIView):
             TenderLogSerializer(tender).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class TenderLogImportAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        company = get_company_from_request(request)
+        uploaded_file = request.FILES.get('file')
+
+        if not uploaded_file:
+            return Response(
+                {'detail': 'Please upload an Excel or CSV file.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            payloads = rows_to_tender_log_payloads(
+                parse_uploaded_table(uploaded_file),
+                company,
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        imported = []
+
+        with transaction.atomic():
+            for index, payload in enumerate(payloads, start=1):
+                serializer = TenderLogSerializer(
+                    data=payload,
+                    context={'request': request, 'company': company},
+                )
+                try:
+                    serializer.is_valid(raise_exception=True)
+                    imported.append(TenderLogSerializer(serializer.save()).data)
+                except ValidationError as exc:
+                    raise ValidationError(
+                        {'detail': f'Row {index}: {extract_error_message(exc.detail)}'}
+                    )
+
+        return Response({'count': len(imported), 'rows': imported}, status=status.HTTP_201_CREATED)
 
 
 class TenderLogDetailAPIView(APIView):
@@ -501,6 +592,44 @@ class MasterListAPIView(APIView):
         )
 
 
+class MasterListImportAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        company = get_company_from_request(request)
+        uploaded_file = request.FILES.get('file')
+
+        if not uploaded_file:
+            return Response(
+                {'detail': 'Please upload an Excel or CSV file.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            payloads = rows_to_master_list_payloads(parse_uploaded_table(uploaded_file))
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        imported = []
+
+        with transaction.atomic():
+            for index, payload in enumerate(payloads, start=1):
+                serializer = MasterListItemSerializer(
+                    data=payload,
+                    context={'request': request, 'company': company},
+                )
+                try:
+                    serializer.is_valid(raise_exception=True)
+                    imported.append(MasterListItemSerializer(serializer.save()).data)
+                except ValidationError as exc:
+                    raise ValidationError(
+                        {'detail': f'Row {index}: {extract_error_message(exc.detail)}'}
+                    )
+
+        return Response({'count': len(imported), 'rows': imported}, status=status.HTTP_201_CREATED)
+
+
 class MasterListDetailAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
@@ -543,6 +672,10 @@ class ContractRevenueAPIView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
+        ensure_admin_or_approval_execution(
+            request,
+            'Contract revenue and budget entries must be approved by admin before they are saved.',
+        )
         company = get_company_from_request(request)
         ensure_request_dates_in_open_period(request.data, company)
         serializer = ContractRevenueSerializer(
@@ -799,41 +932,91 @@ class CostingRevisionSnapshotAPIView(APIView):
         serializer = CostingRevisionSnapshotEntrySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        is_admin_direct_submit = get_user_role(request.user) == ROLE_ADMIN
 
-        snapshot, created = CostingRevisionSnapshot.objects.get_or_create(
-            company=company,
-            tender_number=data['tender_number'],
-            revision_number=data['revision_number'],
-            variation_number=data['variation_number'],
-            defaults={
-                'project_name': data['project_name'],
-                'status': CostingRevisionSnapshot.STATUS_SUBMITTED,
-                'submitted_by': getattr(request.user, 'username', '') or '',
-                'approved_by': '',
-                'approved_at': None,
-            },
-        )
-
-        if not created:
-            snapshot.project_name = data['project_name']
-            snapshot.variation_number = data['variation_number']
-            snapshot.status = CostingRevisionSnapshot.STATUS_SUBMITTED
-            snapshot.submitted_by = getattr(request.user, 'username', '') or ''
-            snapshot.approved_by = ''
-            snapshot.approved_at = None
-            snapshot.submitted_at = timezone.now()
-            snapshot.save(
-                update_fields=[
-                    'project_name',
-                    'variation_number',
-                    'status',
-                    'submitted_by',
-                    'approved_by',
-                    'approved_at',
-                    'submitted_at',
-                    'updated_at',
-                ]
+        with transaction.atomic():
+            snapshot, created = CostingRevisionSnapshot.objects.get_or_create(
+                company=company,
+                tender_number=data['tender_number'],
+                revision_number=data['revision_number'],
+                variation_number=data['variation_number'],
+                defaults={
+                    'project_name': data['project_name'],
+                    'status': (
+                        CostingRevisionSnapshot.STATUS_APPROVED
+                        if is_admin_direct_submit
+                        else CostingRevisionSnapshot.STATUS_SUBMITTED
+                    ),
+                    'submitted_by': getattr(request.user, 'username', '') or '',
+                    'approved_by': (
+                        getattr(request.user, 'username', '') or ''
+                        if is_admin_direct_submit
+                        else ''
+                    ),
+                    'approved_at': timezone.now() if is_admin_direct_submit else None,
+                },
             )
+
+            if not created:
+                snapshot.project_name = data['project_name']
+                snapshot.variation_number = data['variation_number']
+                snapshot.status = (
+                    CostingRevisionSnapshot.STATUS_APPROVED
+                    if is_admin_direct_submit
+                    else CostingRevisionSnapshot.STATUS_SUBMITTED
+                )
+                snapshot.submitted_by = getattr(request.user, 'username', '') or ''
+                snapshot.approved_by = (
+                    getattr(request.user, 'username', '') or ''
+                    if is_admin_direct_submit
+                    else ''
+                )
+                snapshot.approved_at = timezone.now() if is_admin_direct_submit else None
+                snapshot.submitted_at = timezone.now()
+                snapshot.save(
+                    update_fields=[
+                        'project_name',
+                        'variation_number',
+                        'status',
+                        'submitted_by',
+                        'approved_by',
+                        'approved_at',
+                        'submitted_at',
+                        'updated_at',
+                    ]
+                )
+
+            variation_number = data['variation_number'] or ''
+            title_suffix = (
+                f' - {variation_number}'
+                if variation_number
+                else ''
+            )
+            if not is_admin_direct_submit:
+                upsert_pending_approval_request(
+                    title=(
+                        f'Costing Revision - {data["tender_number"]} '
+                        f'{data["revision_number"]}{title_suffix}'
+                    ),
+                    request_type='costing_revision_submission',
+                    endpoint_path=f'/api/estimation/costing-snapshots/{snapshot.pk}/approve/',
+                    submitted_by=request.user,
+                    company=company,
+                    payload={
+                        'tender_number': data['tender_number'],
+                        'project_name': data['project_name'],
+                        'revision_number': data['revision_number'],
+                        'variation_number': variation_number,
+                        'status': snapshot.status,
+                    },
+                    reject_endpoint_path=f'/api/estimation/costing-snapshots/{snapshot.pk}/reject/',
+                    reject_payload={
+                        'tender_number': data['tender_number'],
+                        'project_name': data['project_name'],
+                        'revision_number': data['revision_number'],
+                        'variation_number': variation_number,
+                    },
+                )
 
         response_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         return Response(
@@ -849,14 +1032,40 @@ class CostingRevisionSnapshotApproveAPIView(APIView):
     permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
 
     def post(self, request, pk):
-        if not is_manager_or_admin(getattr(request.user, 'role', '')):
-            raise PermissionDenied('Only manager or admin can approve costing revisions.')
+        ensure_admin_user(request.user, 'Only admin can approve costing revisions.')
 
         company = get_company_from_request(request)
         snapshot = CostingRevisionSnapshot.objects.get(pk=pk, company=company)
         snapshot.status = CostingRevisionSnapshot.STATUS_APPROVED
         snapshot.approved_by = getattr(request.user, 'username', '') or ''
         snapshot.approved_at = timezone.now()
+        snapshot.save(
+            update_fields=['status', 'approved_by', 'approved_at', 'updated_at']
+        )
+
+        return Response(
+            CostingRevisionSnapshotSerializer(
+                snapshot,
+                context={'request': request, 'company': company},
+            ).data
+        )
+
+
+class CostingRevisionSnapshotRejectAPIView(APIView):
+    permission_classes = [IsAuthenticated, ApiRoleAccessPermission]
+
+    def post(self, request, pk):
+        ensure_admin_user(request.user, 'Only admin can reject costing revisions.')
+
+        company = get_company_from_request(request)
+        snapshot = CostingRevisionSnapshot.objects.get(pk=pk, company=company)
+
+        if snapshot.status != CostingRevisionSnapshot.STATUS_SUBMITTED:
+            raise PermissionDenied('Only submitted costing revisions can be rejected.')
+
+        snapshot.status = CostingRevisionSnapshot.STATUS_REJECTED
+        snapshot.approved_by = ''
+        snapshot.approved_at = None
         snapshot.save(
             update_fields=['status', 'approved_by', 'approved_at', 'updated_at']
         )
@@ -896,6 +1105,253 @@ def parse_boq_upload(uploaded_file):
         raise ValueError('Upload a .xlsx or .csv file.')
 
     return rows_to_boq_items(sheet_rows)
+
+
+def extract_error_message(value):
+    if value in (None, '', []):
+        return ''
+
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, list):
+        return ' '.join(filter(None, [extract_error_message(item) for item in value]))
+
+    if isinstance(value, dict):
+        for nested_value in value.values():
+            nested_message = extract_error_message(nested_value)
+            if nested_message:
+                return nested_message
+
+    return str(value)
+
+
+def get_import_column_map(headers, aliases, required_fields):
+    column_map = {}
+
+    for field, field_aliases in aliases.items():
+        for index, header in enumerate(headers):
+            if header in field_aliases:
+                column_map[field] = index
+                break
+
+    missing_fields = [field for field in required_fields if field not in column_map]
+    if missing_fields:
+        raise ValueError(
+            'Excel must include these columns: '
+            + ', '.join(required_fields)
+            + '.'
+        )
+
+    return column_map
+
+
+def rows_to_client_data_payloads(sheet_rows):
+    if not sheet_rows:
+        raise ValueError('The uploaded file is empty.')
+
+    header_row, data_rows = get_header_row_and_data_rows(sheet_rows)
+
+    if not header_row:
+        raise ValueError('The uploaded file is empty.')
+
+    headers = [normalize_header(value) for value in header_row]
+    column_map = get_import_column_map(
+        headers,
+        {
+            'clientName': {'clientname', 'nameofclient'},
+            'customerId': {'customerid'},
+            'supplierTrnNo': {'clienttrnno', 'trnno', 'trnnumber', 'suppliertrnno'},
+            'poBox': {'pobox'},
+            'country': {'country'},
+            'city': {'city'},
+            'contactPerson': {'contactperson', 'nameofcontactperson'},
+            'mobileNumber': {'mobilenumber', 'mobile', 'mobile#'},
+            'companyTelNumber': {'companytelnumber', 'companytelephone', 'companytel'},
+            'email': {'email'},
+            'remarks': {'remarks', 'remark'},
+        },
+        ['clientName'],
+    )
+
+    payloads = []
+
+    for row in data_rows:
+        if not any(str(value).strip() for value in row):
+            continue
+
+        payloads.append(
+            {
+                'clientName': get_row_value(row, column_map['clientName']),
+                'customerId': get_row_value(row, column_map.get('customerId')),
+                'supplierTrnNo': get_row_value(row, column_map.get('supplierTrnNo')),
+                'poBox': get_row_value(row, column_map.get('poBox')),
+                'country': get_row_value(row, column_map.get('country')),
+                'city': get_row_value(row, column_map.get('city')),
+                'contactPerson': get_row_value(row, column_map.get('contactPerson')),
+                'mobileNumber': get_row_value(row, column_map.get('mobileNumber')),
+                'companyTelNumber': get_row_value(row, column_map.get('companyTelNumber')),
+                'email': get_row_value(row, column_map.get('email')),
+                'contacts': (
+                    [
+                        {
+                            'name': get_row_value(row, column_map.get('contactPerson')),
+                            'mobileNumber': get_row_value(row, column_map.get('mobileNumber')),
+                            'email': get_row_value(row, column_map.get('email')),
+                        }
+                    ]
+                    if any(
+                        [
+                            get_row_value(row, column_map.get('contactPerson')),
+                            get_row_value(row, column_map.get('mobileNumber')),
+                            get_row_value(row, column_map.get('email')),
+                        ]
+                    )
+                    else []
+                ),
+                'remarks': get_row_value(row, column_map.get('remarks')),
+            }
+        )
+
+    if not payloads:
+        raise ValueError('No client data rows were found in the uploaded file.')
+
+    return payloads
+
+
+def rows_to_tender_log_payloads(sheet_rows, company):
+    if not sheet_rows:
+        raise ValueError('The uploaded file is empty.')
+
+    header_row, data_rows = get_header_row_and_data_rows(sheet_rows)
+
+    if not header_row:
+        raise ValueError('The uploaded file is empty.')
+
+    headers = [normalize_header(value) for value in header_row]
+    column_map = get_import_column_map(
+        headers,
+        {
+            'tenderNumber': {'tendernumber', 'tenderno'},
+            'quoteRef': {'quoteref', 'quote'},
+            'revisionNumber': {'revisionnumber', 'revisionno', 'rev', 'revno'},
+            'revisionDate': {'revisiondate', 'revdate'},
+            'clientName': {'clientname'},
+            'contactName': {'contactname', 'contactperson'},
+            'projectName': {'projectname'},
+            'projectLocation': {'projectlocation', 'location'},
+            'geography': {'geography'},
+            'typeOfContract': {'typeofcontract', 'contracttype'},
+            'description': {'description'},
+            'sellingAmount': {'sellingamount'},
+            'tenderDate': {'tenderdate', 'date'},
+            'submissionDate': {'submissiondate', 'tendersubmissiondate'},
+            'status': {'status'},
+            'remarks': {'remarks', 'remark'},
+        },
+        ['tenderNumber', 'clientName'],
+    )
+
+    payloads = []
+
+    for row in data_rows:
+        if not any(str(value).strip() for value in row):
+            continue
+
+        client_name = get_row_value(row, column_map['clientName'])
+        client = ClientData.objects.filter(company=company, client_name=client_name).first()
+
+        if not client:
+            raise ValueError(f'Client not found in Client Data: {client_name}')
+
+        contact_name = get_row_value(row, column_map.get('contactName'))
+        contact = None
+
+        if contact_name:
+            contact = ClientContact.objects.filter(
+                client=client,
+                name__iexact=contact_name,
+            ).first()
+            if not contact:
+                raise ValueError(
+                    f'Contact "{contact_name}" not found for client "{client_name}".'
+                )
+        else:
+            contact = client.contacts.order_by('id').first()
+
+        payloads.append(
+            {
+                'tenderNumber': get_row_value(row, column_map['tenderNumber']),
+                'quoteRef': get_row_value(row, column_map.get('quoteRef')),
+                'revisionNumber': get_row_value(row, column_map.get('revisionNumber')) or 'R0',
+                'revisionDate': get_row_value(row, column_map.get('revisionDate')) or None,
+                'clientId': client.id,
+                'contactId': contact.id if contact else None,
+                'projectName': get_row_value(row, column_map.get('projectName')),
+                'projectLocation': get_row_value(row, column_map.get('projectLocation')),
+                'geography': get_row_value(row, column_map.get('geography')) or TenderLog.GEO_UAE,
+                'typeOfContract': (
+                    get_row_value(row, column_map.get('typeOfContract'))
+                    or TenderLog.TYPE_REMEASURABLE
+                ),
+                'description': get_row_value(row, column_map.get('description')),
+                'sellingAmount': get_row_value(row, column_map.get('sellingAmount')) or '0',
+                'tenderDate': get_row_value(row, column_map.get('tenderDate')) or None,
+                'submissionDate': get_row_value(row, column_map.get('submissionDate')) or None,
+                'status': (
+                    get_row_value(row, column_map.get('status'))
+                    or TenderLog.STATUS_UNDER_PRICING
+                ),
+                'remarks': get_row_value(row, column_map.get('remarks')),
+            }
+        )
+
+    if not payloads:
+        raise ValueError('No tender log rows were found in the uploaded file.')
+
+    return payloads
+
+
+def rows_to_master_list_payloads(sheet_rows):
+    if not sheet_rows:
+        raise ValueError('The uploaded file is empty.')
+
+    header_row, data_rows = get_header_row_and_data_rows(sheet_rows)
+
+    if not header_row:
+        raise ValueError('The uploaded file is empty.')
+
+    headers = [normalize_header(value) for value in header_row]
+    column_map = get_import_column_map(
+        headers,
+        {
+            'itemDescription': {'itemdescription', 'description'},
+            'unit': {'unit'},
+            'rate': {'rate'},
+            'poRefNumber': {'porefnumber', 'poref', 'ponumber', 'pono'},
+        },
+        ['itemDescription', 'unit', 'rate'],
+    )
+
+    payloads = []
+
+    for row in data_rows:
+        if not any(str(value).strip() for value in row):
+            continue
+
+        payloads.append(
+            {
+                'itemDescription': get_row_value(row, column_map['itemDescription']),
+                'unit': get_row_value(row, column_map['unit']),
+                'rate': get_row_value(row, column_map['rate']) or '0',
+                'poRefNumber': get_row_value(row, column_map.get('poRefNumber')),
+            }
+        )
+
+    if not payloads:
+        raise ValueError('No master list rows were found in the uploaded file.')
+
+    return payloads
 
 
 def parse_xlsx_rows(content):
@@ -1113,7 +1569,7 @@ def normalize_header(value):
 
 
 def get_row_value(row, index):
-    if index < 0 or index >= len(row):
+    if index is None or index < 0 or index >= len(row):
         return ''
 
     return str(row[index]).strip()

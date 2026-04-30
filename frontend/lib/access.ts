@@ -24,6 +24,10 @@ const legacyRoleMap: Record<string, AppRole> = {
 }
 
 const routeRules: Array<{ prefix: string; roles: AppRole[] }> = [
+  {
+    prefix: '/approvals',
+    roles: ['accountant', 'production_assistant', 'estimator', 'qs', 'manager', 'admin'],
+  },
   { prefix: '/reports/pcr', roles: ['admin'] },
   { prefix: '/reports/bur', roles: ['admin'] },
   {

@@ -234,10 +234,12 @@ class TenderCosting(models.Model):
 class CostingRevisionSnapshot(models.Model):
     STATUS_SUBMITTED = 'submitted'
     STATUS_APPROVED = 'approved'
+    STATUS_REJECTED = 'rejected'
 
     STATUS_CHOICES = (
         (STATUS_SUBMITTED, 'Submitted'),
         (STATUS_APPROVED, 'Approved'),
+        (STATUS_REJECTED, 'Rejected'),
     )
 
     company = models.CharField(

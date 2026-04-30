@@ -1,6 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  isApprovalRequestApproved,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
 import {
   COMPANY_CHANGE_EVENT,
@@ -100,33 +105,45 @@ export default function PersonalDetailsEntryForm() {
 
     try {
       const employeeId = (form.employeeId || nextEmployeeId).trim()
+      const payload = {
+        employee_id: employeeId,
+        employee_name: form.employeeName,
+        designation: form.designation,
+        category: form.category,
+        visa_start_date: form.visaStartDate || null,
+        visa_end_date: form.visaEndDate || null,
+        passport_expiry_date: form.passportExpiryDate || null,
+        visa_under: form.visaUnder,
+        basic_salary: form.basicSalary,
+        allowances: form.allowances,
+        salary_start_date: form.salaryStartDate,
+        employment_start_date: form.employmentStartDate,
+      }
 
-      await fetchAPI('/employees/personal-details/entry/', {
-        method: 'POST',
-        body: JSON.stringify({
-          employee_id: employeeId,
-          employee_name: form.employeeName,
-          designation: form.designation,
-          category: form.category,
-          visa_start_date: form.visaStartDate || null,
-          visa_end_date: form.visaEndDate || null,
-          passport_expiry_date: form.passportExpiryDate || null,
-          visa_under: form.visaUnder,
-          basic_salary: form.basicSalary,
-          allowances: form.allowances,
-          salary_start_date: form.salaryStartDate,
-          employment_start_date: form.employmentStartDate,
-        }),
+      const approvalRequest = await submitApprovalRequest({
+        title: `Personal Details Entry - ${employeeId}`,
+        requestType: 'employee_personal_detail_entry',
+        endpointPath: '/api/employees/personal-details/entry/',
+        company: selectedCompany,
+        payload,
       })
 
-      setEmployeeIds((prev) => [...prev, employeeId])
-      setForm({
-        ...initialForm,
-      })
-      setMessage('Employee personal details saved successfully.')
+      if (isApprovalRequestApproved(approvalRequest)) {
+        setEmployeeIds((prev) => Array.from(new Set([...prev, employeeId])))
+        setForm(initialForm)
+      }
+
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Personal details saved successfully.'
+        )
+      )
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to save employee details.'
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit employee details for approval.'
       )
     }
   }
@@ -315,7 +332,7 @@ export default function PersonalDetailsEntryForm() {
             type="submit"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"
           >
-            Save
+            Submit
           </button>
 
           {message && <p className="text-sm text-green-700">{message}</p>}

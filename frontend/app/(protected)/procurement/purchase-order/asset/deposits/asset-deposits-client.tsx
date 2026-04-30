@@ -1,7 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  isApprovalRequestApproved,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany } from '@/lib/company'
 import { formatDateDdMmmYy } from '@/lib/date-format'
 
 type AssetDepositRecord = {
@@ -53,22 +59,22 @@ export default function AssetDepositsClient() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    async function loadRows() {
-      setLoading(true)
-      setError('')
-
-      try {
-        const data = await fetchAPI('/procurement/asset-deposits/')
-        setRows(Array.isArray(data) ? data : [])
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load asset deposits.')
-      } finally {
-        setLoading(false)
-      }
-    }
-
     void loadRows()
   }, [])
+
+  async function loadRows() {
+    setLoading(true)
+    setError('')
+
+    try {
+      const data = await fetchAPI('/procurement/asset-deposits/')
+      setRows(Array.isArray(data) ? data : [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load asset deposits.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   function handleInputChange(
     event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -95,9 +101,12 @@ export default function AssetDepositsClient() {
     setError('')
 
     try {
-      const savedRow = await fetchAPI('/procurement/asset-deposits/entry/', {
-        method: 'POST',
-        body: JSON.stringify({
+      const approvalRequest = await submitApprovalRequest({
+        title: `Asset Deposit - ${form.serialNumber || form.clientName}`,
+        requestType: 'asset_deposit_entry',
+        endpointPath: '/api/procurement/asset-deposits/entry/',
+        company: getStoredCompany() || '',
+        payload: {
           serial_number: form.serialNumber,
           client_name: form.clientName,
           project_name: form.projectName,
@@ -107,14 +116,26 @@ export default function AssetDepositsClient() {
           mode_of_payment: form.modeOfPayment,
           expiry_date: form.expiryDate,
           status: form.status,
-        }),
+        },
       })
 
-      setRows((prev) => [savedRow, ...prev.filter((row) => row.id !== savedRow.id)])
-      setForm(initialForm)
-      setMessage('Asset deposit saved successfully.')
+      if (isApprovalRequestApproved(approvalRequest)) {
+        setForm(initialForm)
+        await loadRows()
+      }
+
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Asset deposit saved successfully.'
+        )
+      )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save asset deposit.')
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit asset deposit for approval.'
+      )
     } finally {
       setSaving(false)
     }
@@ -256,7 +277,7 @@ export default function AssetDepositsClient() {
             disabled={saving}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
           >
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? 'Submitting...' : 'Submit'}
           </button>
           {message ? <p className="text-sm text-green-700">{message}</p> : null}
         </div>

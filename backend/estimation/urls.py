@@ -8,16 +8,20 @@ from .views import (
     BoqItemListAPIView,
     ClientDataAPIView,
     ClientDataDetailAPIView,
+    ClientDataImportAPIView,
     CostingRevisionSnapshotAPIView,
     CostingRevisionSnapshotApproveAPIView,
+    CostingRevisionSnapshotRejectAPIView,
     ContractPaymentLogAPIView,
     ContractRevenueAPIView,
     ContractRevenueDetailAPIView,
     ContractVariationLogAPIView,
     MasterListAPIView,
     MasterListDetailAPIView,
+    MasterListImportAPIView,
     TenderLogAPIView,
     TenderLogDetailAPIView,
+    TenderLogImportAPIView,
     TenderCostingDetailAPIView,
     TenderCostingListAPIView,
 )
@@ -25,17 +29,32 @@ from .views import (
 urlpatterns = [
     path('client-data/', ClientDataAPIView.as_view(), name='estimation-client-data'),
     path(
+        'client-data/import/',
+        ClientDataImportAPIView.as_view(),
+        name='estimation-client-data-import',
+    ),
+    path(
         'client-data/<int:pk>/',
         ClientDataDetailAPIView.as_view(),
         name='estimation-client-data-detail',
     ),
     path('tender-log/', TenderLogAPIView.as_view(), name='estimation-tender-log'),
     path(
+        'tender-log/import/',
+        TenderLogImportAPIView.as_view(),
+        name='estimation-tender-log-import',
+    ),
+    path(
         'tender-log/<int:pk>/',
         TenderLogDetailAPIView.as_view(),
         name='estimation-tender-log-detail',
     ),
     path('master-list/', MasterListAPIView.as_view(), name='estimation-master-list'),
+    path(
+        'master-list/import/',
+        MasterListImportAPIView.as_view(),
+        name='estimation-master-list-import',
+    ),
     path(
         'master-list/<int:pk>/',
         MasterListDetailAPIView.as_view(),
@@ -92,6 +111,11 @@ urlpatterns = [
         'costing-snapshots/<int:pk>/approve/',
         CostingRevisionSnapshotApproveAPIView.as_view(),
         name='estimation-costing-snapshot-approve',
+    ),
+    path(
+        'costing-snapshots/<int:pk>/reject/',
+        CostingRevisionSnapshotRejectAPIView.as_view(),
+        name='estimation-costing-snapshot-reject',
     ),
     path('bomal/', BomalReportAPIView.as_view(), name='estimation-bomal'),
 ]

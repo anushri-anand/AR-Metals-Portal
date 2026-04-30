@@ -1,7 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  isApprovalRequestApproved,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany } from '@/lib/company'
 import { formatDateDdMmmYy } from '@/lib/date-format'
 import { findNextDocumentNumber } from '@/lib/document-numbering'
 import {
@@ -11,7 +17,6 @@ import {
   MasterListItem,
   TenderCosting,
   calculateCostSummary,
-  createContractRevenue,
   formatMoney,
   getBoqItems,
   getContractRevenues,
@@ -352,7 +357,7 @@ export default function ContractRevenueClient() {
     setSaving(true)
 
     try {
-      const savedRevenue = await createContractRevenue({
+      const payload = {
         projectNumber: form.projectNumber,
         projectName: form.projectName,
         contractRef: form.contractRef.trim(),
@@ -430,13 +435,79 @@ export default function ContractRevenueClient() {
           commitments: roundMoney(variation.variationBudgetCommitments),
           contingencies: roundMoney(variation.variationBudgetContingencies),
         })),
+      }
+
+      const approvalRequest = await submitApprovalRequest({
+        title: `Contract Revenue and Budget - ${payload.projectNumber || payload.projectName}`,
+        requestType: 'contract_revenue_budget',
+        endpointPath: '/api/estimation/contract/revenue/',
+        company: getStoredCompany() || '',
+        payload: {
+          project_number: payload.projectNumber,
+          project_name: payload.projectName,
+          contract_ref: payload.contractRef,
+          contract_value: payload.contractValue,
+          start_date: payload.startDate,
+          completion_date: payload.completionDate,
+          budget_material: payload.budgetMaterial,
+          budget_machining: payload.budgetMachining,
+          budget_coating: payload.budgetCoating,
+          budget_consumables: payload.budgetConsumables,
+          budget_subcontracts: payload.budgetSubcontracts,
+          budget_production_labour: payload.budgetProductionLabour,
+          budget_freight_custom: payload.budgetFreightCustom,
+          budget_installation_labour: payload.budgetInstallationLabour,
+          budget_prelims: payload.budgetPrelims,
+          budget_foh: payload.budgetFoh,
+          budget_commitments: payload.budgetCommitments,
+          budget_contingencies: payload.budgetContingencies,
+          agreed_variation_total: payload.agreedVariationTotal,
+          variation_budget_material: payload.variationBudgetMaterial,
+          variation_budget_machining: payload.variationBudgetMachining,
+          variation_budget_coating: payload.variationBudgetCoating,
+          variation_budget_consumables: payload.variationBudgetConsumables,
+          variation_budget_subcontracts: payload.variationBudgetSubcontracts,
+          variation_budget_production_labour: payload.variationBudgetProductionLabour,
+          variation_budget_freight_custom: payload.variationBudgetFreightCustom,
+          variation_budget_installation_labour: payload.variationBudgetInstallationLabour,
+          variation_budget_prelims: payload.variationBudgetPrelims,
+          variation_budget_foh: payload.variationBudgetFoh,
+          variation_budget_commitments: payload.variationBudgetCommitments,
+          variation_budget_contingencies: payload.variationBudgetContingencies,
+          variations: payload.variations.map((variation) => ({
+            variation_number: variation.variationNumber,
+            amount: variation.amount,
+            material: variation.material,
+            machining: variation.machining,
+            coating: variation.coating,
+            consumables: variation.consumables,
+            subcontracts: variation.subcontracts,
+            production_labour: variation.productionLabour,
+            freight_custom: variation.freightCustom,
+            installation_labour: variation.installationLabour,
+            prelims: variation.prelims,
+            foh: variation.foh,
+            commitments: variation.commitments,
+            contingencies: variation.contingencies,
+          })),
+        },
       })
 
-      setRevenues((prev) => [savedRevenue, ...prev])
-      setMessage('Contract revenue and budget saved.')
+      if (isApprovalRequestApproved(approvalRequest)) {
+        setRevenues(await getContractRevenues())
+      }
+
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Revenue and budget saved successfully.'
+        )
+      )
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to save contract revenue.'
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit contract revenue for approval.'
       )
     } finally {
       setSaving(false)
@@ -631,7 +702,7 @@ export default function ContractRevenueClient() {
             disabled={saving}
             className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saving ? 'Saving...' : 'Save Revenue'}
+            {saving ? 'Submitting...' : 'Submit Revenue'}
           </button>
           {message && <p className="text-sm text-green-700">{message}</p>}
         </div>

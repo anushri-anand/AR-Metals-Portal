@@ -66,11 +66,13 @@ class PurchaseOrder(models.Model):
     STATUS_DRAFT = 'draft'
     STATUS_SUBMITTED = 'submitted'
     STATUS_APPROVED = 'approved'
+    STATUS_REJECTED = 'rejected'
 
     STATUS_CHOICES = (
         (STATUS_DRAFT, 'Draft'),
         (STATUS_SUBMITTED, 'Submitted'),
         (STATUS_APPROVED, 'Approved'),
+        (STATUS_REJECTED, 'Rejected'),
     )
 
     COST_CODE_CHOICES = (

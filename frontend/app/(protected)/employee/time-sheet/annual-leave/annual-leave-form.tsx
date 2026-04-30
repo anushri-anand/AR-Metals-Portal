@@ -1,7 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany } from '@/lib/company'
 
 type EmployeeOption = {
   id: number
@@ -85,21 +90,30 @@ export default function AnnualLeaveForm() {
     setLoading(true)
 
     try {
-      await fetchAPI('/employees/time-sheet/annual-leave/', {
-        method: 'POST',
-        body: JSON.stringify({
+      const approvalRequest = await submitApprovalRequest({
+        title: `Annual Leave - ${form.employeeId || form.employeeName}`,
+        requestType: 'employee_annual_leave',
+        endpointPath: '/api/employees/time-sheet/annual-leave/',
+        company: getStoredCompany() || '',
+        payload: {
           employee_id: form.employeeId,
           from_date: form.fromDate,
           to_date: form.toDate,
           remarks: '',
-        }),
+        },
       })
 
-      setForm(initialForm)
-      setMessage('Annual leave saved successfully.')
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Annual leave saved successfully.'
+        )
+      )
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to save annual leave.'
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit annual leave for approval.'
       )
     } finally {
       setLoading(false)
@@ -186,7 +200,7 @@ export default function AnnualLeaveForm() {
             disabled={loading}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
           >
-            {loading ? 'Saving...' : 'Save'}
+            {loading ? 'Submitting...' : 'Submit'}
           </button>
 
           {message && <p className="text-sm text-green-700">{message}</p>}

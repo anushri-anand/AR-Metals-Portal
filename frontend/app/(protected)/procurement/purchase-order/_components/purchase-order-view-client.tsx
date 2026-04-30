@@ -2,11 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
-import { hasRoleAccess } from '@/lib/access'
 import { formatDateDdMmmYy } from '@/lib/date-format'
 import { openPurchaseOrderPreview } from '@/lib/purchase-order-preview'
 
-type PurchaseOrderStatus = 'draft' | 'submitted' | 'approved'
+type PurchaseOrderStatus = 'draft' | 'submitted' | 'approved' | 'rejected'
 
 type PurchaseItem = {
   line_number: number
@@ -53,20 +52,13 @@ type PurchaseOrderViewClientProps = {
   title: string
 }
 
-type MeResponse = {
-  role: string
-}
-
 export default function PurchaseOrderViewClient({
   orderType,
   title,
 }: PurchaseOrderViewClientProps) {
   const [orders, setOrders] = useState<PurchaseOrderRecord[]>([])
-  const [userRole, setUserRole] = useState<string>('')
   const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState('')
   const [error, setError] = useState('')
-  const [approvingId, setApprovingId] = useState<number | null>(null)
 
   useEffect(() => {
     async function loadData() {
@@ -74,17 +66,15 @@ export default function PurchaseOrderViewClient({
       setError('')
 
       try {
-        const [purchaseOrders, me] = await Promise.all([
-          fetchAPI(`/procurement/purchase-order/?order_type=${orderType}`),
-          fetchAPI('/accounts/me/'),
-        ])
+        const purchaseOrders = await fetchAPI(
+          `/procurement/purchase-order/?order_type=${orderType}`
+        )
 
         setOrders(
           (purchaseOrders || []).filter(
             (order: PurchaseOrderRecord) => order.status !== 'draft'
           )
         )
-        setUserRole((me as MeResponse)?.role || '')
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load purchase orders.')
       } finally {
@@ -104,8 +94,6 @@ export default function PurchaseOrderViewClient({
     () => orders.filter((order) => order.status === 'approved'),
     [orders]
   )
-
-  const canApprove = hasRoleAccess(userRole, ['manager', 'admin'])
 
   function handlePreview(order: PurchaseOrderRecord) {
     openPurchaseOrderPreview({
@@ -162,32 +150,10 @@ export default function PurchaseOrderViewClient({
     })
   }
 
-  async function handleApprove(orderId: number) {
-    setApprovingId(orderId)
-    setMessage('')
-    setError('')
-
-    try {
-      const approvedOrder = await fetchAPI(`/procurement/purchase-order/${orderId}/approve/`, {
-        method: 'POST',
-      })
-
-      setOrders((prev) =>
-        prev.map((order) => (order.id === orderId ? approvedOrder : order))
-      )
-      setMessage('Purchase order approved and moved to the View section.')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve purchase order.')
-    } finally {
-      setApprovingId(null)
-    }
-  }
-
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
-        {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       </div>
 
@@ -197,14 +163,11 @@ export default function PurchaseOrderViewClient({
         </div>
       ) : null}
 
-      {!loading && canApprove ? (
+      {!loading ? (
         <OrderTableSection
           title="Submitted For Approval"
           emptyMessage="No submitted purchase orders are waiting for approval."
           orders={submittedOrders}
-          actionLabel={approvingId ? 'Approving...' : 'Approve'}
-          onAction={handleApprove}
-          actionDisabledId={approvingId}
           onPreview={handlePreview}
         />
       ) : null}
@@ -227,18 +190,12 @@ function OrderTableSection({
   emptyMessage,
   orders,
   onPreview,
-  onAction,
-  actionLabel = 'Approve',
-  actionDisabledId,
   exportScope = false,
 }: {
   title: string
   emptyMessage: string
   orders: PurchaseOrderRecord[]
   onPreview: (order: PurchaseOrderRecord) => void
-  onAction?: (orderId: number) => void
-  actionLabel?: string
-  actionDisabledId?: number | null
   exportScope?: boolean
 }) {
   return (
@@ -297,16 +254,6 @@ function OrderTableSection({
                       >
                         Preview PDF
                       </button>
-                      {onAction ? (
-                        <button
-                          type="button"
-                          onClick={() => onAction(order.id)}
-                          disabled={actionDisabledId === order.id}
-                          className="rounded-lg bg-slate-950 px-3 py-1.5 font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {actionDisabledId === order.id ? actionLabel : 'Approve'}
-                        </button>
-                      ) : null}
                     </div>
                   </BodyCell>
                 </tr>

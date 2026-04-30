@@ -25,6 +25,16 @@ export const sharedNavigation: NavigationSection[] = [
     ],
   },
   {
+    title: 'Approvals',
+    items: [
+      {
+        label: 'Approvals',
+        href: '/approvals',
+        roles: ['accountant', 'production_assistant', 'estimator', 'qs', 'manager', 'admin'],
+      },
+    ],
+  },
+  {
     title: 'Employee',
     items: [
       {

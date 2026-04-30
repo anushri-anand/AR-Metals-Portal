@@ -3,6 +3,10 @@
 import { useEffect, useState } from 'react'
 import { fetchAPI } from '@/lib/api'
 import { createMasterListItem } from '@/lib/estimation-storage'
+import {
+  downloadCsvTemplate,
+  MASTER_LIST_IMPORT_TEMPLATE_HEADERS,
+} from '@/lib/import-templates'
 
 type PurchaseOrderOption = {
   id: number
@@ -21,6 +25,7 @@ export default function MasterListEntryClient() {
   const [form, setForm] = useState(initialForm)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [importing, setImporting] = useState(false)
 
   useEffect(() => {
     async function loadPurchaseOrders() {
@@ -68,6 +73,33 @@ export default function MasterListEntryClient() {
       setMessage('Master list item saved.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save item.')
+    }
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+
+    if (!file) return
+
+    setImporting(true)
+    setMessage('')
+    setError('')
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const data = await fetchAPI('/estimation/master-list/import/', {
+        method: 'POST',
+        body: formData,
+      })
+
+      setForm(initialForm)
+      setMessage(`Imported ${Number(data?.count || 0)} master list row(s).`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import master list.')
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -137,6 +169,28 @@ export default function MasterListEntryClient() {
         </div>
 
         <div className="mt-8 flex flex-wrap items-center gap-4">
+          <label className="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+            {importing ? 'Importing...' : 'Import Excel/CSV'}
+            <input
+              type="file"
+              accept=".xlsx,.csv"
+              onChange={handleImportFile}
+              disabled={importing}
+              className="hidden"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              downloadCsvTemplate(
+                'master-list-import-template.csv',
+                MASTER_LIST_IMPORT_TEMPLATE_HEADERS
+              )
+            }
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            Download Template
+          </button>
           <button
             type="submit"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"

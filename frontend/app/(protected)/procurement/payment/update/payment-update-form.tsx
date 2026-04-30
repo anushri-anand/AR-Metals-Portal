@@ -1,7 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import {
+  getApprovalSubmissionMessage,
+  isApprovalRequestApproved,
+  submitApprovalRequest,
+} from '@/lib/approval-requests'
 import { fetchAPI } from '@/lib/api'
+import { getStoredCompany } from '@/lib/company'
 
 type ApiPhase = {
   id: number
@@ -180,9 +186,12 @@ export default function PaymentUpdateForm() {
     setSaving(true)
 
     try {
-      const updatedRecord = await fetchAPI('/procurement/payment/update/', {
-        method: 'POST',
-        body: JSON.stringify({
+      const approvalRequest = await submitApprovalRequest({
+        title: `Procurement Payment Update - ${form.poNumber}`,
+        requestType: 'procurement_payment_update',
+        endpointPath: '/api/procurement/payment/update/',
+        company: getStoredCompany() || '',
+        payload: {
           po_number: form.poNumber,
           phases: form.phases.map((phase) => ({
             id: phase.id,
@@ -195,19 +204,24 @@ export default function PaymentUpdateForm() {
             gl_no: phase.glNo,
             gl_date: phase.glDate || null,
           })),
-        }),
+        },
       })
 
-      setRecords((prev) =>
-        prev.map((record) =>
-          record.po_number === updatedRecord.po_number ? updatedRecord : record
+      if (isApprovalRequestApproved(approvalRequest)) {
+        await loadPaymentRecords()
+      }
+
+      setMessage(
+        getApprovalSubmissionMessage(
+          approvalRequest,
+          'Payment update saved successfully.'
         )
       )
-      loadRecord(updatedRecord)
-      setMessage('Payment update saved successfully.')
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to save payment update.'
+        err instanceof Error
+          ? err.message
+          : 'Failed to submit payment update for approval.'
       )
     } finally {
       setSaving(false)
@@ -451,7 +465,7 @@ export default function PaymentUpdateForm() {
                 disabled={saving}
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"
               >
-                {saving ? 'Saving...' : 'Save Update'}
+                {saving ? 'Submitting...' : 'Submit Update'}
               </button>
 
               {message && <p className="text-sm text-green-700">{message}</p>}
