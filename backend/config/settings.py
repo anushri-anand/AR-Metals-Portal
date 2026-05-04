@@ -8,10 +8,16 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'fallback-secret-key')
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['*'] if DEBUG else ['localhost', '127.0.0.1']
+def get_env_list(name, default=''):
+    raw_value = os.getenv(name, default)
+    return [item.strip() for item in str(raw_value).split(',') if item.strip()]
+
+
+SECRET_KEY = os.getenv('SECRET_KEY', 'fallback-secret-key')
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
+
+ALLOWED_HOSTS = get_env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -96,12 +102,10 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:3001',
-    'http://127.0.0.1:3001',
-]
+CORS_ALLOWED_ORIGINS = get_env_list(
+    'CORS_ALLOWED_ORIGINS',
+    'http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001',
+)
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r'^http://localhost:\d+$',
@@ -117,12 +121,10 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     'x-company',
 ]
 
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:3001',
-    'http://127.0.0.1:3001',
-]
+CSRF_TRUSTED_ORIGINS = get_env_list(
+    'CSRF_TRUSTED_ORIGINS',
+    'http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001',
+)
 
 CSRF_TRUSTED_ORIGIN_REGEXES = [
     r'^http://localhost:\d+$',

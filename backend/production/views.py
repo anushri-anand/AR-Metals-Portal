@@ -1169,12 +1169,7 @@ class ProjectOptionsAPIView(APIView):
 
     def get(self, request):
         company = get_company_from_request(request)
-        projects = ProjectDetail.objects.prefetch_related(
-            'items',
-        ).filter(company=company).order_by('project_number')
-        return Response(
-            [build_project_option_payload(company, project) for project in projects]
-        )
+        return Response(get_contract_project_options(company))
 
 
 class ProductionContractOptionsAPIView(APIView):

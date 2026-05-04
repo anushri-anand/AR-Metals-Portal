@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import {
+  getMyApprovalRequests,
   getApprovalSubmissionMessage,
   isApprovalRequestApproved,
   submitApprovalRequest,
@@ -16,6 +17,7 @@ import {
   ContractRevenue,
   MasterListItem,
   TenderCosting,
+  TenderLog,
   calculateCostSummary,
   formatMoney,
   getBoqItems,
@@ -23,6 +25,7 @@ import {
   getContractVariationLogs,
   getMasterListItems,
   getTenderCostings,
+  getTenderLogs,
 } from '@/lib/estimation-storage'
 
 const budgetFields = [
@@ -69,13 +72,13 @@ type RevenueForm = {
 } & Record<BudgetKey | VariationBudgetKey, string>
 
 type ProjectOption = {
-  id: number
+  id: string | number
   project_name: string
   project_number: string
   tender_number: string
   revision_number: string
-  contract_po_ref?: string
 }
+
 
 type VariationBudgetSection = {
   variationNumber: string
@@ -136,7 +139,12 @@ export default function ContractRevenueClient() {
   const [form, setForm] = useState<RevenueForm>(initialForm)
   const [revenues, setRevenues] = useState<ContractRevenue[]>([])
   const [variationLogs, setVariationLogs] = useState<ContractVariationLog[]>([])
-  const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([])
+  const [tenderLogs, setTenderLogs] = useState<TenderLog[]>([])
+  const [submittedProjectNumbers, setSubmittedProjectNumbers] = useState<string[]>([])
+  const projectOptions = useMemo(
+    () => getProjectOptionsFromTenderLogs(tenderLogs),
+    [tenderLogs]
+  )
   const [boqItems, setBoqItems] = useState<BoqItem[]>([])
   const [costings, setCostings] = useState<TenderCosting[]>([])
   const [masterItems, setMasterItems] = useState<MasterListItem[]>([])
@@ -152,25 +160,44 @@ export default function ContractRevenueClient() {
         const [
           savedRevenues,
           savedVariationLogs,
-          savedProjects,
+          savedTenderLogs,
+          approvalRequests,
           savedBoqItems,
           savedCostings,
           savedMasterItems,
         ] = await Promise.all([
           getContractRevenues(),
           getContractVariationLogs(),
-          fetchAPI('/production/project-details/options/'),
+          getTenderLogs(),
+          getMyApprovalRequests(),
           getBoqItems(),
           getTenderCostings(),
           getMasterListItems(),
         ])
 
+        const nextSubmittedProjectNumbers = approvalRequests
+          .filter(
+            (request) =>
+              request.requestType === 'contract_revenue_budget' &&
+              request.status !== 'rejected'
+          )
+          .map((request) => {
+            const payload = request.payload || {}
+            const projectNumber =
+              payload.projectNumber || payload.project_number || ''
+
+            return String(projectNumber || '').trim()
+          })
+          .filter(Boolean)
+
         setRevenues(savedRevenues)
         setVariationLogs(savedVariationLogs)
-        setProjectOptions(savedProjects)
+        setTenderLogs(savedTenderLogs)
+        setSubmittedProjectNumbers(nextSubmittedProjectNumbers)
         setBoqItems(savedBoqItems)
         setCostings(savedCostings)
         setMasterItems(savedMasterItems)
+
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'Failed to load contract revenue.'
@@ -185,12 +212,12 @@ export default function ContractRevenueClient() {
     () =>
       findNextDocumentNumber(
         [
-          ...projectOptions.map((project) => project.project_number),
           ...revenues.map((revenue) => revenue.projectNumber),
-        ],
+          ...submittedProjectNumbers,
+        ].filter(Boolean),
         'PR'
       ),
-    [projectOptions, revenues]
+    [revenues, submittedProjectNumbers]
   )
 
   useEffect(() => {
@@ -206,9 +233,8 @@ export default function ContractRevenueClient() {
   const selectedProjectOption =
     projectOptions.find(
       (project) => project.project_name === form.projectName
-    ) ||
-    projectOptions.find((project) => project.project_number === form.projectNumber) ||
-    null
+    ) || null
+
   const variationBudgetSections = getVariationBudgetSectionsForProject(
     selectedProjectOption,
     boqItems,
@@ -313,19 +339,6 @@ export default function ContractRevenueClient() {
     e: React.ChangeEvent<HTMLInputElement>
   ) {
     const nextProjectNumber = e.target.value
-    const matchedProject = projectOptions.find(
-      (project) => project.project_number === nextProjectNumber
-    )
-
-    if (matchedProject) {
-      applyProjectSelection({
-        projectNumber: nextProjectNumber,
-        projectName: matchedProject.project_name,
-        tenderNumber: matchedProject.tender_number,
-        revisionNumber: matchedProject.revision_number,
-      })
-      return
-    }
 
     setForm((prev) => ({
       ...prev,
@@ -333,6 +346,7 @@ export default function ContractRevenueClient() {
     }))
     setSavedRfvFilter('')
   }
+
 
   function handleProjectNameChange(
     e: React.ChangeEvent<HTMLSelectElement>
@@ -343,7 +357,7 @@ export default function ContractRevenueClient() {
     )
 
     applyProjectSelection({
-      projectNumber: form.projectNumber || matchedProject?.project_number || '',
+      projectNumber: form.projectNumber,
       projectName: nextProjectName,
       tenderNumber: matchedProject?.tender_number,
       revisionNumber: matchedProject?.revision_number,
@@ -443,48 +457,48 @@ export default function ContractRevenueClient() {
         endpointPath: '/api/estimation/contract/revenue/',
         company: getStoredCompany() || '',
         payload: {
-          project_number: payload.projectNumber,
-          project_name: payload.projectName,
-          contract_ref: payload.contractRef,
-          contract_value: payload.contractValue,
-          start_date: payload.startDate,
-          completion_date: payload.completionDate,
-          budget_material: payload.budgetMaterial,
-          budget_machining: payload.budgetMachining,
-          budget_coating: payload.budgetCoating,
-          budget_consumables: payload.budgetConsumables,
-          budget_subcontracts: payload.budgetSubcontracts,
-          budget_production_labour: payload.budgetProductionLabour,
-          budget_freight_custom: payload.budgetFreightCustom,
-          budget_installation_labour: payload.budgetInstallationLabour,
-          budget_prelims: payload.budgetPrelims,
-          budget_foh: payload.budgetFoh,
-          budget_commitments: payload.budgetCommitments,
-          budget_contingencies: payload.budgetContingencies,
-          agreed_variation_total: payload.agreedVariationTotal,
-          variation_budget_material: payload.variationBudgetMaterial,
-          variation_budget_machining: payload.variationBudgetMachining,
-          variation_budget_coating: payload.variationBudgetCoating,
-          variation_budget_consumables: payload.variationBudgetConsumables,
-          variation_budget_subcontracts: payload.variationBudgetSubcontracts,
-          variation_budget_production_labour: payload.variationBudgetProductionLabour,
-          variation_budget_freight_custom: payload.variationBudgetFreightCustom,
-          variation_budget_installation_labour: payload.variationBudgetInstallationLabour,
-          variation_budget_prelims: payload.variationBudgetPrelims,
-          variation_budget_foh: payload.variationBudgetFoh,
-          variation_budget_commitments: payload.variationBudgetCommitments,
-          variation_budget_contingencies: payload.variationBudgetContingencies,
+          projectNumber: payload.projectNumber,
+          projectName: payload.projectName,
+          contractRef: payload.contractRef,
+          contractValue: payload.contractValue,
+          startDate: payload.startDate,
+          completionDate: payload.completionDate,
+          budgetMaterial: payload.budgetMaterial,
+          budgetMachining: payload.budgetMachining,
+          budgetCoating: payload.budgetCoating,
+          budgetConsumables: payload.budgetConsumables,
+          budgetSubcontracts: payload.budgetSubcontracts,
+          budgetProductionLabour: payload.budgetProductionLabour,
+          budgetFreightCustom: payload.budgetFreightCustom,
+          budgetInstallationLabour: payload.budgetInstallationLabour,
+          budgetPrelims: payload.budgetPrelims,
+          budgetFoh: payload.budgetFoh,
+          budgetCommitments: payload.budgetCommitments,
+          budgetContingencies: payload.budgetContingencies,
+          agreedVariationTotal: payload.agreedVariationTotal,
+          variationBudgetMaterial: payload.variationBudgetMaterial,
+          variationBudgetMachining: payload.variationBudgetMachining,
+          variationBudgetCoating: payload.variationBudgetCoating,
+          variationBudgetConsumables: payload.variationBudgetConsumables,
+          variationBudgetSubcontracts: payload.variationBudgetSubcontracts,
+          variationBudgetProductionLabour: payload.variationBudgetProductionLabour,
+          variationBudgetFreightCustom: payload.variationBudgetFreightCustom,
+          variationBudgetInstallationLabour: payload.variationBudgetInstallationLabour,
+          variationBudgetPrelims: payload.variationBudgetPrelims,
+          variationBudgetFoh: payload.variationBudgetFoh,
+          variationBudgetCommitments: payload.variationBudgetCommitments,
+          variationBudgetContingencies: payload.variationBudgetContingencies,
           variations: payload.variations.map((variation) => ({
-            variation_number: variation.variationNumber,
+            variationNumber: variation.variationNumber,
             amount: variation.amount,
             material: variation.material,
             machining: variation.machining,
             coating: variation.coating,
             consumables: variation.consumables,
             subcontracts: variation.subcontracts,
-            production_labour: variation.productionLabour,
-            freight_custom: variation.freightCustom,
-            installation_labour: variation.installationLabour,
+            productionLabour: variation.productionLabour,
+            freightCustom: variation.freightCustom,
+            installationLabour: variation.installationLabour,
             prelims: variation.prelims,
             foh: variation.foh,
             commitments: variation.commitments,
@@ -496,6 +510,30 @@ export default function ContractRevenueClient() {
       if (isApprovalRequestApproved(approvalRequest)) {
         setRevenues(await getContractRevenues())
       }
+
+      if (payload.projectNumber) {
+        setSubmittedProjectNumbers((prev) =>
+          prev.includes(payload.projectNumber)
+            ? prev
+            : [...prev, payload.projectNumber]
+        )
+      }
+
+      const nextProjectNumber = findNextDocumentNumber(
+        [
+          ...revenues.map((revenue) => revenue.projectNumber),
+          ...submittedProjectNumbers,
+          payload.projectNumber,
+        ],
+        'PR'
+      )
+
+      setForm({
+        ...initialForm,
+        projectNumber: nextProjectNumber,
+      })
+      setSavedRfvFilter('')
+      setBudgetMessage('')
 
       setMessage(
         getApprovalSubmissionMessage(
@@ -1051,6 +1089,44 @@ function getSavedRevenueVariationRows(revenues: ContractRevenue[]) {
   })
 }
 
+function getProjectOptionsFromTenderLogs(tenderLogs: TenderLog[]): ProjectOption[] {
+  const latestByProjectName = new Map<string, ProjectOption>()
+
+  tenderLogs.forEach((tender) => {
+    const projectName = String(tender.projectName || '').trim()
+
+    if (!projectName) return
+
+    const nextOption: ProjectOption = {
+      id: tender.id,
+      project_name: projectName,
+      project_number: '',
+      tender_number: String(tender.tenderNumber || ''),
+      revision_number: String(tender.revisionNumber || ''),
+    }
+
+    const currentOption = latestByProjectName.get(projectName)
+
+    if (!currentOption) {
+      latestByProjectName.set(projectName, nextOption)
+      return
+    }
+
+    if (
+      compareRevisionNumbers(
+        nextOption.revision_number,
+        currentOption.revision_number
+      ) < 0
+    ) {
+      latestByProjectName.set(projectName, nextOption)
+    }
+  })
+
+  return Array.from(latestByProjectName.values()).sort((left, right) =>
+    left.project_name.localeCompare(right.project_name)
+  )
+}
+
 function getRevenueBudgetForProject(
   value: {
     projectNumber: string
@@ -1064,8 +1140,7 @@ function getRevenueBudgetForProject(
   masterItems: MasterListItem[]
 ) {
   const project =
-    projects.find((item) => item.project_name === value.projectName) ||
-    projects.find((item) => item.project_number === value.projectNumber)
+  projects.find((item) => item.project_name === value.projectName) || null
   const tenderNumber = value.tenderNumber || project?.tender_number || ''
   const projectRevisionNumber =
     value.revisionNumber || project?.revision_number || ''
